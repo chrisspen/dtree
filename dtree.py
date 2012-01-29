@@ -306,36 +306,37 @@ def choose_attribute(data, attributes, class_attr, fitness):
 def is_continuous(v):
     return isinstance(v, (float, Decimal))
 
-def create_decision_tree(data, attributes, class_attr, fitness_func):
+def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper):
     """
     Returns a new decision tree based on the examples given.
     """
     
     data = list(data) if isinstance(data, FileData) else data
-    unique_class_values = set(record[class_attr] for record in data)
+    if wrapper.is_continuous_class:
+        stop_value = CDist(seq=[r[class_attr] for r in data])
+        # For a continuous class case, stop if all the remaining records have
+        # a variance below the given threshold.
+        stop = wrapper.leaf_threshold is not None \
+            and stop_value.variance <= wrapper.leaf_threshold
+    else:
+        stop_value = DDist(seq=[r[class_attr] for r in data])
+        # For a discrete class, stop if all remaining records have the same
+        # classification.
+        stop = len(stop_value.counts) <= 1
 
-    # If the dataset is empty or the attributes list is empty, return the
-    # default value. When checking the attributes list for emptiness, we
-    # need to subtract 1 to account for the target attribute.
     if not data or (len(attributes) - 1) <= 0:
-#        print 'leaf1:',unique_class_values
-        #default = majority_value(data, class_attr)
-#        return default
-        if is_continuous(data[0][class_attr]):
-            value = CDist(seq=[r[class_attr] for r in data])
-        else:
-            value = DDist(seq=[r[class_attr] for r in data])
-        return value
-    elif len(unique_class_values) == 1:
+        # If the dataset is empty or the attributes list is empty, return the
+        # default value. When checking the attributes list for emptiness, we
+        # need to subtract 1 to account for the target attribute.
+        if wrapper:
+            wrapper.leaf_count += 1
+        return stop_value
+    elif stop:
         # If all the records in the dataset have the same classification,
         # return that classification.
-#        print 'leaf2:',value
-        value = unique_class_values.pop()
-        if is_continuous(data[0][class_attr]):
-            value = CDist(seq=[value])
-        else:
-            value = DDist(seq=[r[class_attr] for r in data])
-        return value
+        if wrapper:
+            wrapper.leaf_count += 1
+        return stop_value
     else:
         # Choose the next best attribute to best classify our data
 #        print class_attr
@@ -359,7 +360,8 @@ def create_decision_tree(data, attributes, class_attr, fitness_func):
                 [r for r in data if r[best] == val],
                 [attr for attr in attributes if attr != best],
                 class_attr,
-                fitness_func)
+                fitness_func,
+                wrapper=wrapper)
 
             # Add the new subtree to the empty dictionary object in our new
             # tree/node we just created.
@@ -473,11 +475,17 @@ class DTree(object):
     Wrapper for a decision tree allowing either classification or regression.
     """
     
-    def __init__(self):
+    def __init__(self, leaf_threshold=None):
         self._tree = None
         self._data = None
+        self.leaf_count = 0
+        self.leaf_threshold = leaf_threshold
         self.missing_value_policy = {}
-        
+    
+    @property
+    def is_continuous_class(self):
+        return self._data.is_continuous_class
+    
     def set_missing_value_policy(self, policy, target_attr_name=None):
         """
         Sets the behavior for one or all attributes to use when traversing the
@@ -620,13 +628,14 @@ class DTree(object):
             fitness_func = gain
         
         t = cls(*args, **kwargs)
+        t._data = data
         t._tree = create_decision_tree(
             data=data,
             attributes=data.attribute_names,
             class_attr=data.class_attr_name,
             fitness_func=fitness_func,
+            wrapper=t,
         )
-        t._data = data
         return t
     
 class Test(unittest.TestCase):
@@ -653,11 +662,26 @@ class Test(unittest.TestCase):
             print row
     
     def test_tree(self):
+        
+        # If we set no leaf threshold for a continuous class
+        # then there will be the same number of leaf nodes
+        # as there are number of records.
         t = DTree.build(FileData('rdata2'))
         pprint(t._tree, indent=4)
         result = t.test(FileData('rdata1'))
         print 'MAE:',result.mean
         self.assertAlmostEqual(result.mean, 0.001368, 5)
+        self.assertEqual(t.leaf_count, 16)
+        
+        # If we set a leaf threshold, then this will limit the number of leaf
+        # nodes created, speeding up prediction, at the expense of increasing
+        # the mean absolute error.
+        t = DTree.build(FileData('rdata2'), leaf_threshold=0.0005)
+        pprint(t._tree, indent=4)
+        result = t.test(FileData('rdata1'))
+        print 'MAE:',result.mean
+        self.assertAlmostEqual(result.mean, 0.00623, 5)
+        self.assertEqual(t.leaf_count, 10)
         
         t = DTree.build(FileData('cdata1'))
         pprint(t._tree, indent=4)
@@ -687,7 +711,6 @@ class Test(unittest.TestCase):
         # But if we tell it to use the nearest value, then it should pass.
         t.set_missing_value_policy(USE_NEAREST)
         result = t.predict(dict(a=1,b=2,c=3,d=4))
-        print result
 
 if __name__ == '__main__':
     unittest.main()
