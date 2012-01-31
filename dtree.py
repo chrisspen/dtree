@@ -20,7 +20,7 @@ import unittest
 
 from decimal import Decimal
 
-VERSION = (0, 1, 1)
+VERSION = (0, 1, 2)
 __version__ = '.'.join(map(str, VERSION))
 
 def mean(seq):
@@ -122,7 +122,8 @@ class CDist(object):
     
     @property
     def variance(self):
-        return self.last_variance/float(self.mean_count)
+        if self.mean_count:
+            return self.last_variance/float(self.mean_count)
 
 DEFAULT_ENTROPY_METHOD = 1
 

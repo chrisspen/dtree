@@ -1,5 +1,5 @@
 =============================================================================
-Dtree - A Simple Pure-Python Decision Tree Contruction Algorithm
+Dtree - A simple pure-Python decision tree construction algorithm
 =============================================================================
 
 Overview
@@ -31,6 +31,18 @@ Download the code and then run:
 
     python setup.py build
     sudo python setup.py install
+    
+You can also install from PyPI using pip via:
+
+::
+
+    sudo pip install dtree
+    
+Or upgrade from an earlier version via:
+
+::
+
+    sudo pip install --upgrade dtree
 
 Usage
 -----
