@@ -41,12 +41,15 @@ class DDist(object):
     """
     
     def __init__(self, seq=None):
-        self.counts = defaultdict(int)
-        self.total = 0
+        self.clear()
         if seq:
             for k in seq:
                 self.counts[k] += 1
                 self.total += 1
+    
+    def clear(self):
+        self.counts = defaultdict(int)
+        self.total = 0
     
     def __getitem__(self, k):
         """
@@ -95,12 +98,15 @@ class CDist(object):
     """
     
     def __init__(self, seq=None):
-        self.mean_sum = 0
-        self.mean_count = 0
-        self.last_variance = 0
+        self.clear()
         if seq:
             for n in seq:
                 self += n
+    
+    def clear(self):
+        self.mean_sum = 0
+        self.mean_count = 0
+        self.last_variance = 0
     
     def __repr__(self):
         return "<%s mean=%s variance=%s>" \
@@ -312,7 +318,7 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper):
     Returns a new decision tree based on the examples given.
     """
     
-    data = list(data) if isinstance(data, FileData) else data
+    data = list(data) if isinstance(data, Data) else data
     if wrapper.is_continuous_class:
         stop_value = CDist(seq=[r[class_attr] for r in data])
         # For a continuous class case, stop if all the remaining records have
@@ -370,35 +376,57 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper):
 
     return tree
 
-ATTR_TYPE_NOMINAL = 'nominal'
-ATTR_TYPE_DISCRETE = 'discrete'
-ATTR_TYPE_CONTINUOUS = 'continuous'
+ATTR_TYPE_NOMINAL = NOM = 'nominal'
+ATTR_TYPE_DISCRETE = DIS = 'discrete'
+ATTR_TYPE_CONTINUOUS = CON = 'continuous'
 
-ATTR_MODE_CLASS = 'class'
+ATTR_MODE_CLASS = CLS = 'class'
 
 ATTR_HEADER_PATTERN = re.compile("([^,:]+):(nominal|discrete|continuous)(?::(class))?")
 
-class FileData(object):
+class Data(object):
     """
-    Parses, validates and iterates over tabular data in a file.
+    Parses, validates and iterates over tabular data in a file
+    or an generic iterator.
     
     This does not store the actual data rows. It only stores the row schema.
     """
     
-    def __init__(self, filename=None):
-        self.filename = filename
-        if filename:
+    def __init__(self, inp, order=None, types=None, modes=None):
+        
+        self.header_types = types or {} # {attr_name:type}
+        self.header_modes = modes or {} # {attr_name:mode}
+        if isinstance(order, basestring):
+            order = order.split(',')
+        self.header_order = order or [] # [attr_name,...]
+        
+        self.filename = None
+        self.data = None
+        if isinstance(inp, basestring):
+            filename = inp
             assert os.path.isfile(filename), \
                 "File \"%s\" does not exist." % filename
-                
-        self.header_types = {} # {attr_name:type}
+            self.filename = filename
+        else:
+            assert self.header_types, "No attribute types specified."
+            assert self.header_modes, "No attribute modes specified."
+            #assert self.header_order, "No attribute order specified."
+            self.data = inp
+        
         self.class_attr_name = None
-        self.row_map = [] # [attr_name,...]
+        if self.header_modes:
+            for k,v in self.header_modes.iteritems():
+                if v != CLS:
+                    continue
+                self.class_attr_name = k
+                break
+            assert self.class_attr_name, "No class attribute specified."
                 
     def __len__(self):
         if self.filename:
             return max(0, open(self.filename).read().strip().count('\n'))
-        return 0
+        elif hasattr(self.data, '__len__'):
+            return len(self.data)
 
     @property
     def attribute_names(self):
@@ -420,19 +448,24 @@ class FileData(object):
             == ATTR_TYPE_CONTINUOUS
 
     def _read_header(self):
+        """
+        When a CSV file is given, extracts header information the file.
+        Otherwise, this header data must be explicitly given when the object
+        is instantiated.
+        """
         if not self.filename or self.header_types:
             return
         rows = csv.reader(open(self.filename))
         header = rows.next()
         self.header_types = {} # {attr_name:type}
         self.class_attr_name = None
-        self.row_map = [] # [attr_name,...]
+        self.header_order = [] # [attr_name,...]
         for el in header:
             matches = ATTR_HEADER_PATTERN.findall(el)
             assert matches, "Invalid header element: %s" % (el,)
             el_name,el_type,el_mode = matches[0]
             el_name = el_name.strip()
-            self.row_map.append(el_name)
+            self.header_order.append(el_name)
             self.header_types[el_name] = el_type
             if el_mode == ATTR_MODE_CLASS:
                 assert self.class_attr_name is None, \
@@ -443,28 +476,41 @@ class FileData(object):
                     "Non-class continuous attributes are not supported."
         assert self.class_attr_name, "A class attribute must be specified."
 
+    def validate_row(self, row):
+        """
+        Ensure each element in the row matches the schema.
+        """
+        clean_row = {}
+        if isinstance(row, (tuple, list)):
+            assert self.header_order, "No attribute order specified."
+            assert len(row) == len(self.header_order), \
+                "Row length does not match header length."
+            itr = zip(self.header_order, row)
+        else:
+            assert isinstance(row, dict)
+            itr = row.iteritems()
+        for el_name, el_value in itr:
+            if self.header_types[el_name] == ATTR_TYPE_DISCRETE:
+                clean_row[el_name] = int(el_value)
+            elif self.header_types[el_name] == ATTR_TYPE_CONTINUOUS:
+                clean_row[el_name] = float(el_value)
+            else:
+                clean_row[el_name] = el_value
+        return clean_row
+
+    def _get_iterator(self):
+        if self.filename:
+            self._read_header()
+            itr = csv.reader(open(self.filename))
+            itr.next() # Skip header.
+            return itr
+        return self.data
+
     def __iter__(self):
-        if not self.filename:
-            return
-        self._read_header()
-        try:
-            rows = csv.reader(open(self.filename))
-            header = rows.next()
-            while 1:
-                _row = rows.next()
-                if not _row:
-                    continue
-                row = []
-                for el_name, el_value in zip(self.row_map, _row):
-                    if self.header_types[el_name] == ATTR_TYPE_DISCRETE:
-                        row.append(int(el_value))
-                    elif self.header_types[el_name] == ATTR_TYPE_CONTINUOUS:
-                        row.append(float(el_value))
-                    else:
-                        row.append(el_value)
-                yield dict(zip(self.row_map,row))
-        except StopIteration:
-            pass
+        for row in self._get_iterator():
+            if not row:
+                continue
+            yield self.validate_row(row)
 
 USE_NEAREST = 'use_nearest'
 MISSING_VALUE_POLICIES = set([
@@ -578,10 +624,10 @@ class DTree(object):
         Returns a classification or regression for the given data set
         depending on the class attribute type.
         
-        Accepts a list of records, either as an explicit list or FileData
+        Accepts a list of records, either as an explicit list or Data
         object, or a single record in the form of a dictionary.
         """
-        if isinstance(data, (list, FileData)):
+        if isinstance(data, (list, Data)):
             if self._data.is_continuous_class:
                 itr = self._regress(data)
             else:
@@ -622,7 +668,7 @@ class DTree(object):
         Constructs a classification or regression tree in a single batch by
         analyzing the given data.
         """
-        assert isinstance(data, FileData)
+        assert isinstance(data, Data)
         if data.is_continuous_class:
             fitness_func = gain_variance
         else:
@@ -655,21 +701,55 @@ class Test(unittest.TestCase):
         self.assertAlmostEqual(s.variance, variance(nums), 2)
 
     def test_data(self):
-        data = FileData('rdata1')
+        
+        # Load data from a file.
+        data = Data('rdata1')
         self.assertEqual(len(data), 16)
-        data = list(FileData('rdata1'))
+        data = list(Data('rdata1'))
         self.assertEqual(len(data), 16)
-        for row in data:
+#        for row in data:
+#            print row
+
+        # Load data from memory or some other arbitrary source.
+        data = """a,b,c,d,cls
+1,1,1,1,a
+1,1,1,2,a
+1,1,2,3,a
+1,1,2,4,a
+1,2,3,5,a
+1,2,3,6,a
+1,2,4,7,a
+1,2,4,8,a
+2,3,5,1,b
+2,3,5,2,b
+2,3,6,3,b
+2,3,6,4,b
+2,4,7,5,b
+2,4,7,6,b
+2,4,8,7,b
+2,4,8,8,b""".strip().split('\n')
+        rows = list(csv.DictReader(data))
+        self.assertEqual(len(rows), 16)
+        
+        rows = Data(
+            #csv.DictReader(data),
+            map(lambda r:r.split(','), data[1:]),
+            order=['a', 'b', 'c', 'd', 'cls'],
+            types=dict(a=DIS, b=DIS, c=DIS, d=DIS, cls=NOM),
+            modes=dict(cls=CLS))
+        self.assertEqual(len(rows), 16)
+        self.assertEqual(len(list(rows)), 16)
+        for row in rows:
             print row
-    
+
     def test_tree(self):
         
         # If we set no leaf threshold for a continuous class
         # then there will be the same number of leaf nodes
         # as there are number of records.
-        t = DTree.build(FileData('rdata2'))
+        t = DTree.build(Data('rdata2'))
         pprint(t._tree, indent=4)
-        result = t.test(FileData('rdata1'))
+        result = t.test(Data('rdata1'))
         print 'MAE:',result.mean
         self.assertAlmostEqual(result.mean, 0.001368, 5)
         self.assertEqual(t.leaf_count, 16)
@@ -677,28 +757,28 @@ class Test(unittest.TestCase):
         # If we set a leaf threshold, then this will limit the number of leaf
         # nodes created, speeding up prediction, at the expense of increasing
         # the mean absolute error.
-        t = DTree.build(FileData('rdata2'), leaf_threshold=0.0005)
+        t = DTree.build(Data('rdata2'), leaf_threshold=0.0005)
         pprint(t._tree, indent=4)
-        result = t.test(FileData('rdata1'))
+        result = t.test(Data('rdata1'))
         print 'MAE:',result.mean
         self.assertAlmostEqual(result.mean, 0.00623, 5)
         self.assertEqual(t.leaf_count, 10)
         
-        t = DTree.build(FileData('cdata1'))
+        t = DTree.build(Data('cdata1'))
         pprint(t._tree, indent=4)
-        result = t.test(FileData('cdata1'))
+        result = t.test(Data('cdata1'))
         print 'Accuracy:',result.mean
         self.assertAlmostEqual(result.mean, 1.0, 5)
         
-        t = DTree.build(FileData('cdata2'))
+        t = DTree.build(Data('cdata2'))
         pprint(t._tree, indent=4)
-        result = t.test(FileData('cdata3'))
+        result = t.test(Data('cdata3'))
         print 'Accuracy:',result.mean
         self.assertAlmostEqual(result.mean, 0.75, 5)
         
-        t = DTree.build(FileData('cdata4'))
+        t = DTree.build(Data('cdata4'))
         pprint(t._tree, indent=4)
-        result = t.test(FileData('cdata4'))
+        result = t.test(Data('cdata4'))
         print 'Accuracy:',result.mean
         self.assertAlmostEqual(result.mean, 0.5, 5)
         
