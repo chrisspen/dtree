@@ -81,7 +81,7 @@ instance representing the mean absolute error.
 Features
 --------
 
-- classification and regression
+- building a classification or regression tree using batch or incremental/online methods
 
 Todo
 ----
@@ -90,10 +90,12 @@ Does not yet support:
 
 - sparse training data
 - sparse query vector
-- incremental tree construction or updates
 
 History
 -------
 
 0.1.0 - 2012.1.24
 Initial development.
+
+0.2.0 - 2012.2.8
+Refactored to support incremental/online tree construction and forests.
