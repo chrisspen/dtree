@@ -6,7 +6,7 @@ Overview
 --------
 
 Given a training data set, it constructs a decision tree for classification or
-regression in a single batch.
+regression in a single batch or incrementally.
 
 It loads data from CSV files. It expects the first row in the CSV to be a
 header, with each element conforming to the pattern "name:type:mode".
@@ -62,17 +62,17 @@ instance representing the mean absolute error.
 
 ::
 
-    from dtree import DTree, FileData
+    from dtree import Tree, Data
     
-    tree = DTree.build(FileData('classification-training.csv'))
-    result = t.test(FileData('classification-testing.csv'))
+    tree = Tree.build(Data('classification-training.csv'))
+    result = t.test(Data('classification-testing.csv'))
     print 'Accuracy:',result.mean
     prediction = tree.predict(dict(feature1=123, feature2='abc', feature3='hot'))
     print 'best:',prediction.best
     print 'probs:',prediction.probs
     
-    tree = DTree.build(FileData('regression-training.csv'))
-    result = t.test(FileData('regression-testing.csv'))
+    tree = Tree.build(Data('regression-training.csv'))
+    result = t.test(Data('regression-testing.csv'))
     print 'MAE:',result.mean
     prediction = tree.predict(dict(feature1=123, feature2='abc', feature3='hot'))
     print 'mean:',prediction.mean
@@ -94,8 +94,8 @@ Does not yet support:
 History
 -------
 
-0.1.0 - 2012.1.24
+0.1.0 - 2012.01.24
 Initial development.
 
-0.2.0 - 2012.2.8
+0.2.0 - 2012.02.08
 Refactored to support incremental/online tree construction and forests.

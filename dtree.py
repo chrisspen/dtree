@@ -1,13 +1,6 @@
 """
 2012.1.24 CKS
 Algorithms for building and using a decision tree for classification or regression.
-
-todo:
-+support regression
-+support class probabilities for discrete classes
-+support matching nearest node element when a new element in the query vector is encountered
--support missing elements in the query vector
--support sparse data sets
 """
 from collections import defaultdict
 from decimal import Decimal
@@ -21,7 +14,7 @@ import random
 import re
 import unittest
 
-VERSION = (0, 1, 4)
+VERSION = (0, 2, 0)
 __version__ = '.'.join(map(str, VERSION))
 
 # Traditional entropy.
@@ -56,42 +49,60 @@ CONTINUOUS_METRICS = [
 DEFAULT_DISCRETE_METRIC = ENTROPY1
 DEFAULT_CONTINUOUS_METRIC = VARIANCE1
 
-ENSEMBLE = 'ensemble'
+# Methods for aggregating the predictions of trees in a forest.
+EQUAL_MEAN = 'equal-mean'
+WEIGHTED_MEAN = 'weighted-mean'
 BEST = 'best'
-
 AGGREGATION_METHODS = [
-    ENSEMBLE,
+    EQUAL_MEAN,
+    WEIGHTED_MEAN,
     BEST,
 ]
 
+# Forest growth algorithms.
 GROW_RANDOM = 'random'
 GROW_AUTO_MINI_BATCH = 'auto-mini-batch'
 GROW_AUTO_INCREMENTAL = 'auto-incremental'
-GROWTH_METHODS = [
+GROW_METHODS = [
     GROW_RANDOM,
     GROW_AUTO_MINI_BATCH,
     GROW_AUTO_INCREMENTAL,
 ]
 
+# Data format names.
 ATTR_TYPE_NOMINAL = NOM = 'nominal'
 ATTR_TYPE_DISCRETE = DIS = 'discrete'
 ATTR_TYPE_CONTINUOUS = CON = 'continuous'
-
 ATTR_MODE_CLASS = CLS = 'class'
-
 ATTR_HEADER_PATTERN = re.compile("([^,:]+):(nominal|discrete|continuous)(?::(class))?")
 
 def mean(seq):
+    """
+    Batch mean calculation.
+    """
     return sum(seq)/float(len(seq))
 
 def variance(seq):
+    """
+    Batch variance calculation.
+    """
     m = mean(seq)
     return sum((v-m)**2 for v in seq)/float(len(seq))
 
 def mean_absolute_error(seq, correct):
+    """
+    Batch mean absolute error calculation.
+    """
     assert len(seq) == len(correct)
     diffs = [abs(a-b) for a,b in zip(seq,correct)]
     return sum(diffs)/float(len(diffs))
+
+def normalize(seq):
+    """
+    Scales each number in the sequence so that the sum of all numbers equals 1.
+    """
+    s = float(sum(seq))
+    return [v/s for v in seq]
 
 class DDist(object):
     """
@@ -283,7 +294,6 @@ def entropy(data, class_attr=None, method=DEFAULT_DISCRETE_METRIC):
         else:
             raise Exception, "Unknown entropy method %s." % method
     except:
-        print 'Error:',counts
         raise
 
 def entropy_variance(data, class_attr=None,
@@ -422,7 +432,6 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper, sp
     """
     Returns a new decision tree based on the examples given.
     """
-#    print 'fitness_func1:',fitness_func
     node = None
     data = list(data) if isinstance(data, Data) else data
     if wrapper.is_continuous_class:
@@ -996,7 +1005,7 @@ class Node(object):
     def tree(self):
         return self._tree
 
-    def update(self, record):
+    def train(self, record):
         """
         Incrementally update the statistics at this node.
         """
@@ -1027,7 +1036,6 @@ class Node(object):
         # Decide if branch should split on an attribute.
         if self.ready_to_split:
             self.attr_name = self.get_best_splitting_attr()
-#            print 'splitting on',self.attr_name
             self.tree.leaf_count -= 1
             for av in self._attr_value_counts[self.attr_name]:
                 self._branches[av] = Node(tree=self.tree)
@@ -1037,13 +1045,12 @@ class Node(object):
         if self.attr_name:
             key = record[self.attr_name]
             del record[self.attr_name]
-            self._branches[key].update(record)
+            self._branches[key].train(record)
 
 class Tree(object):
     """
     Represents a single grown or built decision tree.
     """
-    #TODO:merge with DTree
     
     def __init__(self, data, **kwargs):
         assert isinstance(data, Data)
@@ -1055,6 +1062,7 @@ class Tree(object):
         
         # The mean absolute error.
         self.mae = CDist()
+        self._mae_clean = True
         
         # Set the metric used to calculate the information gain
         # after an attribute split.
@@ -1085,6 +1093,22 @@ class Tree(object):
             
         # The total number of leaf nodes.
         self.leaf_count = 0
+        
+        # The total number of samples trained on.
+        self.sample_count = 0
+        
+        ### Used for forests.
+        
+        # The prediction accuracy on held-out samples.
+        self.out_of_bag_accuracy = CDist()
+        
+        # Samples not given to the tree for training with which the
+        # out-of-bag accuracy is calculated from.
+        self._out_of_bag_samples = []
+        
+        # The mean absolute error for predictions on out-of-bag samples.
+        self._out_of_bag_mae = CDist()
+        self._out_of_bag_mae_clean = True
     
     def __getitem__(self, attr_name):
         return self.tree[attr_name]
@@ -1100,10 +1124,10 @@ class Tree(object):
             fitness_func = gain_variance
         else:
             fitness_func = gain
-#        print 'fitness_func:',fitness_func
         
         t = cls(data=data, *args, **kwargs)
         t._data = data
+        t.sample_count = len(data)
         t._tree = create_decision_tree(
             data=data,
             attributes=data.attribute_names,
@@ -1126,6 +1150,43 @@ class Tree(object):
         tree = pickle.load(open(fn))
         assert isinstance(tree, cls), "Invalid pickle."
         return tree
+    
+    @property
+    def out_of_bag_mae(self):
+        """
+        Returns the mean absolute error for predictions on the out-of-bag
+        samples.
+        """
+        if not self._out_of_bag_mae_clean:
+            try:
+                self._out_of_bag_mae = self.test(self.out_of_bag_samples)
+                self._out_of_bag_mae_clean = True
+            except NodeNotReadyToPredict:
+                return
+        return self._out_of_bag_mae.copy()
+    
+    @property
+    def out_of_bag_samples(self):
+        """
+        Returns the out-of-bag samples list, inside a wrapper to keep track
+        of modifications.
+        """
+        #TODO:replace with more a generic pass-through wrapper?
+        class O(object):
+            def __init__(self, tree):
+                self.tree = tree
+            def __len__(self):
+                return len(self.tree._out_of_bag_samples)
+            def append(self, v):
+                self.tree._out_of_bag_mae_clean = False
+                return self.tree._out_of_bag_samples.append(v)
+            def pop(self, v):
+                self.tree._out_of_bag_mae_clean = False
+                return self.tree._out_of_bag_samples.pop(v)
+            def __iter__(self):
+                for _ in self.tree._out_of_bag_samples:
+                    yield _
+        return O(self)
 
     def predict(self, record):
         record = record.copy()
@@ -1157,9 +1218,7 @@ class Tree(object):
         is_continuous = self._data.is_continuous_class
         agg = CDist()
         for record in data:
-#            print 'record:',record
             actual_value = self.predict(record)
-#            print 'actual_value:',actual_value
             expected_value = record[self._data.class_attribute_name]
             if is_continuous:
                 assert isinstance(actual_value, CDist)
@@ -1177,118 +1236,68 @@ class Tree(object):
     def tree(self):
         return self._tree
     
-    def update(self, record):
+    def train(self, record):
         """
         Incrementally updates the tree with the given sample record.
         """
         assert self.data.class_attribute_name in record, \
             "The class attribute must be present in the record."
         record = record.copy()
-        self.tree.update(record)
+        self.sample_count += 1
+        self.tree.train(record)
 
 def _get_defaultdict_cdist():
     return defaultdict(CDist)
 
 class Forest(object):
     
-    def __init__(self, class_attr, **kwargs):
+    def __init__(self, data, tree_kwargs=None, **kwargs):
+        assert isinstance(data, Data)
+        self._data = data
         
-        self.class_attr = class_attr
-        self.class_attr_min = kwargs.get('class_attr_min', None)
-        self.class_attr_max = kwargs.get('class_attr_max', None)
-        self.attribute_values = defaultdict(DDist) # {attr_name:DDist(k=prob)}
-        # Average class value per attribute value.
-        # {attr_name:{attr_value:cdist}}
-        self.attribute_value_cdists = defaultdict(_get_defaultdict_cdist)
-        
+        # The population of trees.
         self.trees = []
-        self.growth_method = kwargs.get('growth_method', GROW_RANDOM)
         
-        # Mini-batch training parameters.
-        self.mini_batch_size = kwargs.get('mini_batch_size', 5)
-        self.mini_batch_sampling = kwargs.get('mini_batch_sampling', 0.5)
-        self.aggregation_method = kwargs.get('aggregation_method', ENSEMBLE)
-        self._in_bag_samples = []
-        self._out_of_bag_samples = []
+        # Arguments that will be passed to each tree during init.
+        self.tree_kwargs = tree_kwargs or {}
         
-        assert self.aggregation_method in AGGREGATION_METHODS, \
-            "Method %s is not supported." % (self.aggregation_method,)
-    
-    def _grow_tree(self, attr_names, top=True):
+        self.grow_method = kwargs.get('grow_method', GROW_RANDOM)
+        assert self.grow_method in GROW_METHODS, \
+            "Growth method %s is not supported." % (self.grow_method,)
         
-        attr_names = list(attr_names)
-        key = tuple(attr_names)
-        attr_name = attr_names.pop(0)
-        tree = {attr_name:{}}
-        for attr_value in self.attribute_values[attr_name].counts.iterkeys():
-            if attr_names:
-                # Construct a branch.
-                sub_tree = self._grow_tree(attr_names, top=False)
-                tree[attr_name][attr_value] = sub_tree
-            else:
-                # Construct a leaf.
-                seed_cdist = self.attribute_value_cdists[attr_name][attr_value]
-                new_cdist = CDist()
-                new_cdist += seed_cdist.mean
-                tree[attr_name][attr_value] = new_cdist
+        # The number of trees in the forest.
+        self.size = kwargs.get('size', 10)
         
-        if top:
-            t = Tree(class_attr=self.class_attr, key=key)
-            t._tree = tree
-            return t
-        return tree
-    
-    def grow_randomly(self, n=10):
-        if self.trees:
-            return
-        all_attrs = self.attribute_values.keys()
-        for _ in xrange(n):
-            avail_attrs = list(all_attrs)
-            max_attrs = random.randint(1, len(all_attrs))
-            current_attrs = []
-            while len(current_attrs) < max_attrs:
-                i = random.randint(0, len(avail_attrs)-1)
-                random_attr = avail_attrs.pop(i)
-                current_attrs.append(random_attr)
-#            print current_attrs
-            tree = self._grow_tree(current_attrs)
-            #pprint(tree._tree, indent=4)
-            self.trees.append(tree)
-    
-    def _get_ensemble_prediction(self, record, train=True):
-        """
-        Attempts to predict the value of the class attribute by aggregating
-        the predictions of each tree.
-        """
+        # The ratio of training samples given to each tree.
+        # The rest are held to test tree accuracy.
+        self.sample_ratio = kwargs.get('sample_ratio', 0.9)
         
-        # Get raw predictions.
-        predictions = {} # {tree:raw prediction}
-        total_mae = 0
-        for tree in self.trees:
-            predictions[tree] = prediction,tree_mae = tree.predict(record, train=train)
-            total_mae += 0 if tree_mae.mean is None else tree_mae.mean
-
-        # Weight raw predictions according to each tree's MAE.
-        total = 0
-        weights = []
-        prediction_values = []
-        for tree in predictions:
-            prediction,tree_mae = predictions[tree]
-            if total_mae:
-                weight = 1-tree_mae.mean/total_mae
-                prediction_values.append(prediction.mean)
-                weights.append(weight)
+        # The maximum number of out of bag samples to store in each tree.
+        self.max_out_of_bag_samples = \
+            kwargs.get('max_out_of_bag_samples', 1000)
+        
+        # The method for how we consolidate each tree's prediction into
+        # a single prediction.
+#        self.aggregation_method = kwargs.get('aggregation_method', WEIGHTED_MEAN)
+#        assert self.aggregation_method in AGGREGATION_METHODS, \
+#            "Aggregation method %s is not supported." \
+#                % (self.aggregation_method,)
+        self.weighting_method = kwargs.get('weighting_method',
+            Forest.mean_oob_mae_weight)
                 
-        # Normalize weights and aggregate final prediction.
-        if weights:
-            weights = normalize(weights)
-            total = sum(w*p for w,p in zip(weights, prediction_values))
-        elif self.class_attr_min is not None and self.class_attr_max is not None:
-            total = (self.class_attr_min + self.class_attr_max)/2.
-        else:
-            total = 0
-        
-        return total
+        # The criteria defining how and when old trees are removed from the
+        # forest and replaced by new trees.
+        # This is a callable that is given a list of all the current trees
+        # and returns a list of trees that should be removed.
+        self.fell_method = kwargs.get('fell_method', None)
+    
+    def _fell_trees(self):
+        """
+        Removes trees from the forest according to the specified fell method.
+        """
+        if callable(self.fell_method):
+            for tree in self.fell_method(list(self.trees)):
+                self.trees.remove(tree)
     
     def _get_best_prediction(self, record, train=True):
         """
@@ -1303,66 +1312,146 @@ class Forest(object):
         prediction,tree_mae = best_tree.predict(record, train=train)
         return prediction.mean
     
-    def _add_training_sample(self, record):
-        assert self.class_attr in record
-        if self.aggregation_method == AUTO_MINI_BATCH:
-            
-            if random.random() < self.mini_batch_sampling:
-                self._in_bag_samples.append(record)
-            else:
-                self._out_of_bag_samples.append(record)
-            
-            if len(self._in_bag_samples) >= self.mini_batch_size:
-                self._mini_batch_train()
-    
-    def _mini_batch_train(self):
+    @staticmethod
+    def best_oob_mae_weight(trees):
         """
-        Uses records in the training buffer to generate a new tree and add
-        to the forest.
+        Returns weights so that the tree with smallest out-of-bag mean absolute error
         """
-        todo
-    
-    def predict(self, record, train=True):
-        assert method in PREDICTION_METHODS
-        cattr = self.class_attr
+        best = (+1e999999, None)
+        for tree in trees:
+            oob_mae = tree.out_of_bag_mae
+            if oob_mae is None or oob_mae.mean is None:
+                continue
+            best = min(best, (oob_mae.mean, tree))
+        best_mae, best_tree = best
+        if best_tree is None:
+            return
+        return [(1.0, best_tree)]
         
-        # Make prediction.
-        prediction = None
-        if self.trees:
-            if aggregation_method == ENSEMBLE:
-                prediction = self._get_ensemble_prediction(record, train=train)
-            elif aggregation_method == BEST:
-                prediction = self._get_best_prediction(record, train=train)
-        elif self.class_attr_min is not None \
-            and self.class_attr_max is not None:
-            prediction = (self.class_attr_min + self.class_attr_max)/2.
-        else:
-            prediction = 0
-            
-        if train:
-            self._add_training_example(record)
-            
-            # Update global attribute value distributions.
-            for k,v in record.iteritems():
-                if k == cattr:
+    @staticmethod
+    def mean_oob_mae_weight(trees):
+        """
+        Returns weights proportional to the out-of-bag mean absolute error for each tree.
+        """
+        weights = []
+        active_trees = []
+        for tree in trees:
+            oob_mae = tree.out_of_bag_mae
+            if oob_mae is None or oob_mae.mean is None:
+                continue
+            weights.append(oob_mae.mean)
+            active_trees.append(tree)
+        if not active_trees:
+            return
+        weights = normalize(weights)
+        return zip(weights, active_trees)
+    
+    def _grow_trees(self):
+        """
+        Adds new trees to the forest according to the specified growth method.
+        """
+        if self.grow_method == GROW_AUTO_INCREMENTAL:
+            self.tree_kwargs['auto_grow'] = True
+        
+        while len(self.trees) < self.size:
+            self.trees.append(Tree(data=self.data, **self.tree_kwargs))
+    
+    @property
+    def data(self):
+        return self._data
+        
+    def predict(self, record):
+        """
+        Attempts to predict the value of the class attribute by aggregating
+        the predictions of each tree.
+        
+        Parameters:
+            weighting_formula := a callable that takes a list of trees and
+                returns a list of weights.
+        """
+        
+        # Get raw predictions.
+        # {tree:raw prediction}
+        predictions = {}
+        for tree in self.trees:
+            _p = tree.predict(record)
+            if _p is None:
+                continue
+            if isinstance(_p, CDist):
+                if _p.mean is None:
                     continue
-                self.attribute_values[k].add(v)
-                if cattr in record:
-                    self.attribute_value_cdists[k][v] += record[cattr]
-            if cattr in record:
-                self.class_attr_min = min(self.class_attr_min,
-                                          record[cattr])
-                self.class_attr_max = max(self.class_attr_max,
-                                          record[cattr])
-                
-        return prediction
+            elif isinstance(_p, DDist):
+                if not _p.count:
+                    continue
+            predictions[tree] = _p
+        if not predictions:
+            return
+
+        # Normalize weights and aggregate final prediction.
+        weights = self.weighting_method(predictions.keys())
+        if not weights:
+            return
+#        assert sum(weights) == 1.0, "Sum of weights must equal 1."
+        if self.data.is_continuous_class:
+            # Merge continuous class predictions.
+            total = sum(w*predictions[tree].mean for w,tree in weights)
+        else:
+            # Merge discrete class predictions.
+            total = DDist()
+            for weight,tree in weights:
+                prediction = predictions[tree]
+                for cls_value,cls_prob in prediction.probs:
+                    total.add(cls_value, cls_prob*weight)
+        
+        return total
+    
+    def set_missing_value_policy(self, policy, target_attr_name=None):
+        for tree in self.trees:
+            tree.set_missing_value_policy(policy, target_attr_name)
+    
+    def test(self, data):
+        """
+        Iterates over the data, classifying or regressing each element and then
+        finally returns the classification accuracy or mean-absolute-error.
+        """
+#        assert data.header_types == self._data.header_types, \
+#            "Test data schema does not match the tree's schema."
+        is_continuous = self.data.is_continuous_class
+        agg = CDist()
+        for record in data:
+            actual_value = self.predict(record)
+            if actual_value is None:
+                continue
+            expected_value = record[self._data.class_attribute_name]
+            if is_continuous:
+                assert isinstance(actual_value, CDist), \
+                    "Invalid prediction type: %s" % (type(actual_value),)
+                actual_value = actual_value.mean
+                agg += abs(actual_value - expected_value)
+            else:
+                assert isinstance(actual_value, DDist), \
+                    "Invalid prediction type: %s" % (type(actual_value),)
+                agg += actual_value.best == expected_value
+        return agg
     
     def train(self, record):
-        todo
+        """
+        Updates the trees with the given training record.
+        """
+        self._fell_trees()
+        self._grow_trees()
+        for tree in self.trees:
+            if random.random() < self.sample_ratio:
+                tree.train(record)
+            else:
+                tree.out_of_bag_samples.append(record)
+                while len(tree.out_of_bag_samples) > self.max_out_of_bag_samples:
+                    tree.out_of_bag_samples.pop(0)
 
 class Test(unittest.TestCase):
 
     def test_stat(self):
+        print 'Testing statistics classes...'
         nums = range(1,10)
         s = CDist()
         seen = []
@@ -1374,9 +1463,23 @@ class Test(unittest.TestCase):
             print 'variance:',s.variance
         self.assertAlmostEqual(s.mean, mean(nums), 1)
         self.assertAlmostEqual(s.variance, variance(nums), 2)
+        self.assertEqual(s.count, 9)
+        
+        d1 = DDist(['a','b','a','a','b'])
+        d2 = DDist(['a','b','a','a','b'])
+        d3 = DDist(['a','b','a','a','b','c'])
+        self.assertEqual(d1, d2)
+        self.assertNotEqual(d1, d3)
+        self.assertNotEqual(d2, d3)
+        self.assertEqual(d1.best, 'a')
+        self.assertEqual(d1.best_prob, 3/5.)
+        self.assertEqual(d2.best, 'a')
+        self.assertEqual(d3.best, 'a')
+        
         print 'Done.'
 
     def test_data(self):
+        print 'Testing data class...'
         
         # Load data from a file.
         data = Data('rdata1')
@@ -1420,6 +1523,7 @@ class Test(unittest.TestCase):
         print 'Done.'
 
     def test_batch_tree(self):
+        print 'Testing batch tree...'
         
         # If we set no leaf threshold for a continuous class
         # then there will be the same number of leaf nodes
@@ -1466,6 +1570,9 @@ class Test(unittest.TestCase):
         
         t = Tree.build(Data('cdata2'))
         pprint(t.to_dict(), indent=4)
+        result = t.test(Data('cdata2'))
+        print 'Accuracy:',result.mean
+        self.assertAlmostEqual(result.mean, 1.0, 5)
         result = t.test(Data('cdata3'))
         print 'Accuracy:',result.mean
         self.assertAlmostEqual(result.mean, 0.75, 5)
@@ -1492,6 +1599,7 @@ class Test(unittest.TestCase):
         print 'Done.'
 
     def test_online_tree(self):
+        print 'Testing online tree...'
         
         rdata3 = Data('rdata3')
         rdata3_lst = list(rdata3)
@@ -1505,7 +1613,7 @@ class Test(unittest.TestCase):
         tree = Tree(cdata2, metric=ENTROPY1)
         for row in cdata2:
 #            print row
-            tree.update(row)
+            tree.train(row)
         node = tree._tree
         attr_gains = [(node.get_gain(attr_name), attr_name) for attr_name in node.attributes]
         attr_gains.sort()
@@ -1519,7 +1627,7 @@ class Test(unittest.TestCase):
         tree = Tree(cdata2, metric=ENTROPY2)
         for row in cdata2:
 #            print row
-            tree.update(row)
+            tree.train(row)
         self.assertEqual(set(node.attributes), set(['a','b','c','d']))
         node = tree._tree
         attr_gains = [(node.get_gain(attr_name), attr_name) for attr_name in node.attributes]
@@ -1534,7 +1642,7 @@ class Test(unittest.TestCase):
         tree = Tree(rdata3, metric=VARIANCE1)
         for row in rdata3:
 #            print row
-            tree.update(row)
+            tree.train(row)
         node = tree._tree
         self.assertEqual(set(node.attributes), set(['a','b','c','d']))
         attr_gains = [(node.get_gain(attr_name), attr_name) for attr_name in node.attributes]
@@ -1549,7 +1657,7 @@ class Test(unittest.TestCase):
         tree = Tree(rdata3, metric=VARIANCE2)
         for row in rdata3:
 #            print row
-            tree.update(row)
+            tree.train(row)
         node = tree._tree
         self.assertEqual(set(node.attributes), set(['a','b','c','d']))
         attr_gains = [(node.get_gain(attr_name), attr_name) for attr_name in node.attributes]
@@ -1561,16 +1669,13 @@ class Test(unittest.TestCase):
         self.assertEqual([v for _,v in attr_gains],
             ['d','c','b','a'])
         
-        #t = Tree.build(Data('cdata2'))
-        #pprint(t._tree, indent=4)
-        
         # Incrementally grow a classification tree.
         print "-"*70
         print "Incrementally growing classification tree..."
         tree = Tree(cdata5, metric=ENTROPY2, splitting_n=17, auto_grow=True)
         for row in cdata5:
 #            print row
-            tree.update(row)
+            tree.train(row)
         acc = tree.test(cdata5)
         print 'Initial accuracy:',acc.mean
         self.assertEqual(acc.mean, 0.25)
@@ -1580,7 +1685,7 @@ class Test(unittest.TestCase):
         for _ in xrange(5):
             for row in cdata5:
                 #print row
-                tree.update(row)
+                tree.train(row)
             acc = tree.test(cdata5)
             print 'Accuracy:',acc.mean
         print 'Final tree:'
@@ -1601,19 +1706,54 @@ class Test(unittest.TestCase):
         tree = Tree(rdata3, metric=VARIANCE2, splitting_n=17, auto_grow=True, leaf_threshold=0.0)
         for row in rdata3:
 #            print row
-            tree.update(row)
+            tree.train(row)
         mae = tree.test(rdata3)
         print 'Initial MAE:',mae.mean
         self.assertAlmostEqual(mae.mean, 0.4, 5)
         for _ in xrange(20):
             for row in rdata3:
                 #print row
-                tree.update(row)
+                tree.train(row)
             mae = tree.test(rdata3)
             print 'MAE:',mae.mean
         print "Final tree:"
         pprint(tree.to_dict(), indent=4)
         self.assertEqual(mae.mean, 0.0)
+        print 'Done.'
+
+    def test_forest(self):
+        print 'Testing forest...'
+        print 'Growing forest incrementally...'
+        
+        cdata2 = Data('cdata2')
+        cdata2_lst = list(cdata2)
+        
+        # Incrementally train and test the forest on the same data.
+        forest = Forest(
+            data=cdata2,
+            size=10, # Grow 10 trees.
+            sample_ratio=0.8, # Train each tree on 80% of all records.
+            grow_method=GROW_AUTO_INCREMENTAL, # Incrementally grow each tree.
+            #weighting_method=Forest.best_oob_mae_weight,
+            weighting_method=Forest.mean_oob_mae_weight,
+            tree_kwargs=dict(metric=ENTROPY2),
+        )
+        mae = None
+        for _ in xrange(10):
+            for row in cdata2_lst:
+                #print row
+                forest.train(row)
+            mae = forest.test(cdata2_lst)
+            print 'Forest MAE:',mae.mean
+        self.assertEqual(mae.mean, 1.0)
+        
+        trees = list(forest.trees)
+        trees.sort(key=lambda t:t.out_of_bag_mae.mean)
+        print 'Best tree:'
+        pprint(trees[-1].to_dict(), indent=4)
+        self.assertEqual(trees[-1].auto_grow, True)
+#        for tree in trees:
+#            pprint(tree.to_dict(), indent=4)
         print 'Done.'
 
 if __name__ == '__main__':
