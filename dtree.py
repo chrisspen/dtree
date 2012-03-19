@@ -89,6 +89,9 @@ def variance(seq):
     m = mean(seq)
     return sum((v-m)**2 for v in seq)/float(len(seq))
 
+def standard_deviation(seq):
+    return math.sqrt(variance(seq))
+
 def mean_absolute_error(seq, correct):
     """
     Batch mean absolute error calculation.
@@ -103,6 +106,58 @@ def normalize(seq):
     """
     s = float(sum(seq))
     return [v/s for v in seq]
+
+def erfcc(x):
+    """
+    Complementary error function.
+    """
+    z = abs(x)
+    t = 1. / (1. + 0.5*z)
+    r = t * math.exp(-z*z-1.26551223+t*(1.00002368+t*(.37409196+
+        t*(.09678418+t*(-.18628806+t*(.27886807+
+        t*(-1.13520398+t*(1.48851587+t*(-.82215223+
+        t*.17087277)))))))))
+    if (x >= 0.):
+        return r
+    else:
+        return 2. - r
+
+def normcdf(x, mu, sigma):
+    """
+    Describes the probability that a real-valued random variable X with a given
+    probability distribution will be found at a value less than or equal to X
+    in a normal distribution.
+    
+    http://en.wikipedia.org/wiki/Cumulative_distribution_function
+    """
+    t = x-mu;
+    y = 0.5*erfcc(-t/(sigma*math.sqrt(2.0)));
+    if y>1.0:
+        y = 1.0;
+    return y
+
+def normpdf(x, mu, sigma):
+    """
+    Describes the relative likelihood that a real-valued random variable X will
+    take on a given value.
+    
+    http://en.wikipedia.org/wiki/Probability_density_function
+    """
+    u = (x-mu)/abs(sigma)
+    y = (1/(math.sqrt(2*pi)*abs(sigma)))*math.exp(-u*u/2)
+    return y
+
+def normdist(x, mu, sigma, f=True):
+    if f:
+        y = normcdf(x,mu,sigma)
+    else:
+        y = normpdf(x,mu,sigma)
+    return y
+
+def normrange(x1, x2, mu, sigma, f=True):
+    p1 = normdist(x1, mu, sigma, f)
+    p2 = normdist(x2, mu, sigma, f)
+    return abs(p1-p2)
 
 class DDist(object):
     """
@@ -211,8 +266,17 @@ class CDist(object):
     Incrementally tracks the probability distribution of continuous numbers.
     """
     
-    def __init__(self, seq=None):
+    def __init__(self, seq=None, mean=None, var=None, stdev=None):
         self.clear()
+        if mean is not None:
+            self.mean_sum = mean
+            self.mean_count = 1
+        if var is not None:
+            self.last_variance = var
+            self.mean_count = 1
+        if stdev is not None:
+            self.last_variance = stdev**2
+            self.mean_count = 1
         if seq:
             for n in seq:
                 self += n
@@ -254,7 +318,43 @@ class CDist(object):
     def variance(self):
         if self.mean_count:
             return self.last_variance/float(self.mean_count)
-
+        
+    @property
+    def standard_deviation(self):
+        var = self.variance
+        if var is None:
+            return
+        return math.sqrt(var)
+    
+    def probability_lt(self, x):
+        """
+        Returns the probability of a random variable being less than the
+        given value.
+        """
+        if self.mean is None:
+            return
+        return normdist(x=x, mu=self.mean, sigma=self.standard_deviation)
+    
+    def probability_in(self, a, b):
+        """
+        Returns the probability of a random variable falling between the given
+        values.
+        """
+        if self.mean is None:
+            return
+        p1 = normdist(x=a, mu=self.mean, sigma=self.standard_deviation)
+        p2 = normdist(x=b, mu=self.mean, sigma=self.standard_deviation)
+        return abs(p1 - p2)
+    
+    def probability_gt(self, x):
+        """
+        Returns the probability of a random variable being greater than the
+        given value.
+        """
+        if self.mean is None:
+            return
+        p = normdist(x=x, mu=self.mean, sigma=self.standard_deviation)
+        return 1-p
 
 def entropy(data, class_attr=None, method=DEFAULT_DISCRETE_METRIC):
     """
@@ -1464,6 +1564,13 @@ class Test(unittest.TestCase):
         self.assertAlmostEqual(s.mean, mean(nums), 1)
         self.assertAlmostEqual(s.variance, variance(nums), 2)
         self.assertEqual(s.count, 9)
+#        print s.mean
+#        print s.standard_deviation
+        self.assertAlmostEqual(s.probability_lt(s.mean-s.standard_deviation*6), 0.0, 5)
+        self.assertAlmostEqual(s.probability_lt(s.mean+s.standard_deviation*6), 1.0, 5)
+        self.assertAlmostEqual(s.probability_gt(s.mean-s.standard_deviation*6), 1.0, 5)
+        self.assertAlmostEqual(s.probability_gt(s.mean+s.standard_deviation*6), 0.0, 5)
+        self.assertAlmostEqual(s.probability_in(s.mean, 50), 0.5, 5)
         
         d1 = DDist(['a','b','a','a','b'])
         d2 = DDist(['a','b','a','a','b'])

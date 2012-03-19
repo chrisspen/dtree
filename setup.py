@@ -1,6 +1,9 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 from distutils.core import setup
 import dtree
-setup(name='dtree',
+setup(
+    name='dtree',
     version=dtree.__version__,
     description='A simple pure-Python batch decision tree construction algorithm.',
     author='Chris Spencer',
@@ -18,4 +21,5 @@ setup(name='dtree',
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    platforms=['OS Independent'],)
+    platforms=['OS Independent'],
+)
