@@ -1,7 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from distutils.core import setup
+import os
+from distutils.core import setup, Command
 import dtree
+
+class TestCommand(Command):
+    description = "Runs unittests."
+    user_options = []
+    def initialize_options(self):
+        pass
+    def finalize_options(self):
+        pass
+    def run(self):
+        os.system('python dtree.py')
+
 setup(
     name='dtree',
     version=dtree.__version__,
@@ -22,4 +34,8 @@ setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     platforms=['OS Independent'],
+#    test_suite='dtree',
+    cmdclass={
+        'test': TestCommand,
+    },
 )

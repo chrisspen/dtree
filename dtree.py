@@ -14,7 +14,7 @@ import random
 import re
 import unittest
 
-VERSION = (0, 2, 0)
+VERSION = (0, 2, 1)
 __version__ = '.'.join(map(str, VERSION))
 
 # Traditional entropy.
@@ -614,6 +614,14 @@ class Data(object):
             order = order.split(',')
         self.header_order = order or [] # [attr_name,...]
         
+        # Validate header type.
+        if isinstance(self.header_types, (tuple, list)):
+            assert self.header_order, 'If header type names were not ' + \
+                'given, an explicit order must be specified.'
+            assert len(self.header_types) == len(self.header_order), \
+                'Header order length must match header type length.'
+            self.header_types = dict(zip(self.header_order, self.header_types))
+        
         self.filename = None
         self.data = None
         if isinstance(inp, basestring):
@@ -635,7 +643,17 @@ class Data(object):
                 self._class_attr_name = k
                 break
             assert self._class_attr_name, "No class attribute specified."
-                
+    
+    def copy_no_data(self):
+        """
+        Returns a copy of the object without any data.
+        """
+        return type(self)(
+            [],
+            order=list(self.header_modes),
+            types=self.header_types.copy(),
+            modes=self.header_modes.copy())
+    
     def __len__(self):
         if self.filename:
             return max(0, open(self.filename).read().strip().count('\n'))
@@ -744,6 +762,39 @@ class Data(object):
             if not row:
                 continue
             yield self.validate_row(row)
+            
+    def split(self, ratio=0.5, leave_one_out=False):
+        """
+        Returns two Data instances, containing the data randomly split between
+        the two according to the given ratio.
+        
+        The first instance will contain the ratio of data specified.
+        The second instance will contain the remaining ratio of data.
+        
+        If leave_one_out is True, the ratio will be ignored and the first
+        instance will contain exactly one record for each class label, and
+        the second instance will contain all remaining data.
+        """
+        a_labels = set()
+        a = self.copy_no_data()
+        b = self.copy_no_data()
+        for row in self:
+            if leave_one_out and not self.is_continuous_class:
+                label = row[self.class_attribute_name]
+                if label not in a_labels:
+                    a_labels.add(label)
+                    a.data.append(row)
+                else:
+                    b.data.append(row)
+            elif not len(a):
+                a.data.append(row)
+            elif not len(b):
+                b.data.append(row)
+            elif random.random() <= ratio:
+                a.data.append(row)
+            else:
+                b.data.append(row)
+        return a,b
 
 USE_NEAREST = 'use_nearest'
 MISSING_VALUE_POLICIES = set([
@@ -1627,6 +1678,18 @@ class Test(unittest.TestCase):
         self.assertEqual(len(list(rows)), 16)
         for row in rows:
             print row
+            
+        a,b = rows.split(ratio=0.1)
+        self.assertEqual(len(rows), len(a)+len(b))
+        print '-'*80
+        print 'a:'
+        for row in a:
+            print row
+        print '-'*80
+        print 'b:'
+        for row in b:
+            print row
+            
         print 'Done.'
 
     def test_batch_tree(self):
@@ -1862,6 +1925,76 @@ class Test(unittest.TestCase):
 #        for tree in trees:
 #            pprint(tree.to_dict(), indent=4)
         print 'Done.'
+        
+    def test_milksets(self):
+        try:
+            from milksets import wine, yeast
+        except ImportError, e:
+            print 'Skipping milkset tests because milksets is not installed.'
+            print 'Run `sudo pip install milksets` and rerun these tests.'
+            return
+        
+        def leave_one_out(all_data, metric=None):
+            test_data,train_data = all_data.split(leave_one_out=True)
+#            print 'test:',len(test_data)
+#            print 'train:',len(train_data)
+            tree = Tree.build(train_data, metric=metric)
+            tree.set_missing_value_policy(USE_NEAREST)
+            result = tree.test(test_data)
+            return result.mean
+        
+        def cross_validate(all_data, epoches=10, test_ratio=0.25, metric=None):
+            accuracies = []
+            for epoche in xrange(epoches):
+#                print 'Epoch:',epoche
+                #test_data,train_data = all_data,all_data
+                test_data,train_data = all_data.split(ratio=test_ratio)
+#                print '\ttest:',len(test_data)
+#                print '\ttrain:',len(train_data)
+                tree = Tree.build(train_data, metric=metric)
+                tree.set_missing_value_policy(USE_NEAREST)
+                result = tree.test(test_data)
+#                print 'Epoch accuracy:',result.mean
+                accuracies.append(result.mean)
+            return sum(accuracies)/float(len(accuracies))
+        
+        # Load wine dataset.
+        # Each record has 13 continuous features
+        # and one discrete class containing 2 unique values.
+        print 'Loading UCI wine data...'
+        wine_data = Data(
+             [list(a)+[b] for a,b in zip(*wine.load())],
+            order=map(str,range(13))+['cls'],
+            #types=dict(a=DIS, b=DIS, c=DIS, d=DIS, cls=NOM),
+            types=[CON]*13 + [DIS],
+            modes=dict(cls=CLS))
+        self.assertEqual(len(wine_data), 178)
+        self.assertEqual(len(list(wine_data)), 178)
+#        for row in wine_data:
+#            print row
+            
+        # Load yeast dataset.
+        # Each record has 8 continuous features
+        # and one discrete class containing 10 values.
+        print 'Loading UCI yeast data...'
+        yeast_data = Data(
+             [list(a)+[b] for a,b in zip(*yeast.load())],
+            order=map(str,range(8))+['cls'],
+            #types=dict(a=DIS, b=DIS, c=DIS, d=DIS, cls=NOM),
+            types=[CON]*8 + [DIS],
+            modes=dict(cls=CLS))
+        self.assertEqual(len(yeast_data), 1484)
+        self.assertEqual(len(list(yeast_data)), 1484)
+        
+        acc = leave_one_out(wine_data, metric=ENTROPY1)
+        print 'Wine leave-one-out accuracy: %0.2f' % (acc,)
+        acc = cross_validate(wine_data, metric=ENTROPY1, test_ratio=0.01, epoches=25)
+        print 'Wine cross-validated accuracy: %0.2f' % (acc,)
+        
+        acc = leave_one_out(yeast_data, metric=ENTROPY1)
+        print 'Yeast leave-one-out accuracy: %0.2f' % (acc,)
+        acc = cross_validate(yeast_data, metric=ENTROPY1, test_ratio=0.005, epoches=25)
+        print 'Yeast cross-validated accuracy: %0.2f' % (acc,)
 
 if __name__ == '__main__':
     unittest.main()
