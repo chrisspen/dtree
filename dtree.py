@@ -14,7 +14,7 @@ import random
 import re
 import unittest
 
-VERSION = (0, 2, 1)
+VERSION = (0, 2, 2)
 __version__ = '.'.join(map(str, VERSION))
 
 # Traditional entropy.
@@ -376,7 +376,7 @@ def entropy(data, class_attr=None, method=DEFAULT_DISCRETE_METRIC):
             # Note: A missing attribute is treated like an attribute with a value
             # of None, representing the attribute is "irrelevant".
             counts[record.get(class_attr)] += 1.0
-    len_data = sum(cnt for _,cnt in counts.iteritems())
+    len_data = float(sum(cnt for _,cnt in counts.iteritems()))
     n = max(2, len(counts))
     total = float(sum(counts.values()))
     assert total, "There must be at least one non-zero count."
