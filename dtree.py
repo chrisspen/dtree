@@ -14,7 +14,7 @@ import random
 import re
 import unittest
 
-VERSION = (0, 2, 2)
+VERSION = (0, 2, 3)
 __version__ = '.'.join(map(str, VERSION))
 
 # Traditional entropy.
@@ -384,13 +384,13 @@ def entropy(data, class_attr=None, method=DEFAULT_DISCRETE_METRIC):
         #return -sum((count/total)*math.log(count/total,n) for count in counts)
         if method == ENTROPY1:
             return -sum((count/len_data)*math.log(count/len_data,n)
-                for count in counts.itervalues())
+                for count in counts.itervalues() if count)
         elif method == ENTROPY2:
             return -sum((count/len_data)*math.log(count/len_data,n)
-                for count in counts.itervalues()) - ((len(counts)-1)/float(total))
+                for count in counts.itervalues() if count) - ((len(counts)-1)/float(total))
         elif method == ENTROPY3:
             return -sum((count/len_data)*math.log(count/len_data,n)
-                for count in counts.itervalues()) - 100*((len(counts)-1)/float(total))
+                for count in counts.itervalues() if count) - 100*((len(counts)-1)/float(total))
         else:
             raise Exception, "Unknown entropy method %s." % method
     except:
