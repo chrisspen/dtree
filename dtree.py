@@ -1996,6 +1996,42 @@ class Test(unittest.TestCase):
         acc = cross_validate(yeast_data, metric=ENTROPY1, test_ratio=0.005, epoches=25)
         print 'Yeast cross-validated accuracy: %0.2f' % (acc,)
 
+    def test_entropy(self):
+        # Lopsided distribution with mostly all events in one group
+        # is low entropy.
+        self.assertAlmostEqual(entropy({+1:10,-1:10,0:980}), 0.1018576)
+        # Everything in one group is 0 entropy.
+        self.assertAlmostEqual(entropy({0:1000}), 0.0)
+        # Everything equally divided is highest entropy.
+        self.assertAlmostEqual(entropy({+1:500,-1:500}), 1.0)
+#        
+        data1 = {+1:1,-1:1}#,0:200-2}
+        data2 = {+1:100,-1:100}
+        
+        # Entropy1 doesn't care about size.
+        e11 = entropy(data1, method=ENTROPY1)
+#        print e11
+        e21 = entropy(data2, method=ENTROPY1)
+#        print e21
+        self.assertEqual(e11, 1.0)
+        self.assertEqual(e11, e21)
+        
+        # Entropy2 takes size into account.
+        e12 = entropy(data1, method=ENTROPY2)
+#        print e12
+        e22 = entropy(data2, method=ENTROPY2)
+#        print e22
+        self.assertEqual(e12, 0.5)
+        self.assertEqual(e22, 0.995)
+        
+        # Entropy3 takes large numbers of values into account, but otherwise ignores size.
+        e13 = entropy(data1, method=ENTROPY3)
+#        print e13
+        e23 = entropy(data2, method=ENTROPY3)
+#        print e23
+        self.assertEqual(e13, -49.0)
+        self.assertEqual(e23, 0.5)
+
 if __name__ == '__main__':
     unittest.main()
     
