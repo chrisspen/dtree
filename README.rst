@@ -2,6 +2,8 @@
 Dtree - A simple pure-Python decision tree construction algorithm
 =============================================================================
 
+[<img src="https://secure.travis-ci.org/chrisspen/dtree.png?branch=master" alt="Build Status">](https://travis-ci.org/chrisspen/dtree)
+
 Overview
 --------
 
