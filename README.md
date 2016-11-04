@@ -1,6 +1,5 @@
-=============================================================================
 Dtree - A simple pure-Python decision tree construction algorithm
-=============================================================================
+=================================================================
 
 [<img src="https://secure.travis-ci.org/chrisspen/dtree.png?branch=master" alt="Build Status">](https://travis-ci.org/chrisspen/dtree)
 
@@ -16,8 +15,7 @@ Mode is optional, and denotes the class attribute. Type identifies the
 attribute as either a continuous, discrete, or nominal.
 
 The module is loosely based on code published by Christopher Roach in his
-article `Building Decision Trees in Python
-<http://onlamp.com/pub/a/python/2006/02/09/ai_decision_trees.html>`_.
+article [Building Decision Trees in Python](http://onlamp.com/pub/a/python/2006/02/09/ai_decision_trees.html).
 I refactored his code to be more object-oriented, and extended it to support
 basic regression.
 
@@ -29,20 +27,14 @@ Installation
 
 Download the code and then run:
 
-::
-
     python setup.py build
     sudo python setup.py install
     
 You can also install from PyPI using pip via:
 
-::
-
     sudo pip install dtree
     
 Or upgrade from an earlier version via:
-
-::
 
     sudo pip install --upgrade dtree
 
@@ -61,8 +53,6 @@ classification accuracy.
 With regression, this object will always be a CDist instance, representing a
 mean and variance. In this case, the result from test() will be a CDist
 instance representing the mean absolute error.
-
-::
 
     from dtree import Tree, Data
     
@@ -101,3 +91,6 @@ Initial development.
 
 0.2.0 - 2012.02.08
 Refactored to support incremental/online tree construction and forests.
+
+1.0.0 - 2016.10.30
+Added support for Python 3.
