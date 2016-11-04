@@ -23,9 +23,14 @@ setup(
     url='https://github.com/chrisspen/dtree',
     license='LGPL',
     py_modules=['dtree'],
-    classifiers = [
+    #https://pypi.python.org/pypi?%3Aaction=list_classifiers
+    classifiers=[
         "Programming Language :: Python",
-        "Development Status :: 3 - Alpha",
+        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3.3",
+        "Programming Language :: Python :: 3.4",
+        "Programming Language :: Python :: 3.5",
+        "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
         "Intended Audience :: Science/Research",
         "License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)",

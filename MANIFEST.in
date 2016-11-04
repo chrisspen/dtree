@@ -1,0 +1,2 @@
+include pip-requirements.txt
+include pip-requirements-test.txt
