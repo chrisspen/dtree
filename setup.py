@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import os
-from distutils.core import setup, Command
+from distutils.core import setup, Command # pylint: disable=no-name-in-module
+
 import dtree
 
 class TestCommand(Command):

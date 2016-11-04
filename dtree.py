@@ -165,6 +165,9 @@ def normrange(x1, x2, mu, sigma, f=True):
     p2 = normdist(x2, mu, sigma, f)
     return abs(p1-p2)
 
+def cmp(a, b): # pylint: disable=redefined-builtin
+    return (a > b) - (a < b)
+
 class DDist(object):
     """
     Incrementally tracks the probability distribution of discrete elements.
