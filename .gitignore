@@ -56,3 +56,4 @@ docs/_build/
 
 # PIP install version files.
 /=*
+/*.geany

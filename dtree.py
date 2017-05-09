@@ -20,7 +20,7 @@ import six
 from six.moves import cPickle as pickle
 from six import iteritems, iterkeys, itervalues, string_types
 
-VERSION = (1, 0, 0)
+VERSION = (1, 0, 1)
 __version__ = '.'.join(map(str, VERSION))
 
 # Traditional entropy.
@@ -679,6 +679,10 @@ class Data(object):
         elif hasattr(self.data, '__len__'):
             return len(self.data)
 
+    def __bool__(self):
+        return bool(len(self))
+    __nonzero__ = __bool__
+
     @property
     def class_attribute_name(self):
         return self._class_attr_name
@@ -806,9 +810,9 @@ class Data(object):
                     a.data.append(row)
                 else:
                     b.data.append(row)
-            elif not len(a):
+            elif not a:
                 a.data.append(row)
-            elif not len(b):
+            elif not b:
                 b.data.append(row)
             elif random.random() <= ratio:
                 a.data.append(row)
