@@ -390,20 +390,18 @@ def entropy(data, class_attr=None, method=DEFAULT_DISCRETE_METRIC):
     n = max(2, len(counts))
     total = float(sum(counts.values()))
     assert total, "There must be at least one non-zero count."
-    try:
-        if method == ENTROPY1:
-            return -sum((count/len_data)*math.log(count/len_data, n)
-                for count in counts.values() if count)
-        elif method == ENTROPY2:
-            return -sum((count/len_data)*math.log(count/len_data, n)
-                for count in counts.values() if count) - ((len(counts)-1)/float(total))
-        elif method == ENTROPY3:
-            return -sum((count/len_data)*math.log(count/len_data, n)
-                for count in counts.values() if count) - 100*((len(counts)-1)/float(total))
-        else:
-            raise Exception("Unknown entropy method %s." % method)
-    except Exception:
-        raise
+    if method == ENTROPY1:
+        return -sum((count/len_data)*math.log(count/len_data, n)
+            for count in counts.values() if count)
+    elif method == ENTROPY2:
+        return -sum((count/len_data)*math.log(count/len_data, n)
+            for count in counts.values() if count) - ((len(counts)-1)/float(total))
+    elif method == ENTROPY3:
+        return -sum((count/len_data)*math.log(count/len_data, n)
+            for count in counts.values() if count) - 100*((len(counts)-1)/float(total))
+    else:
+        raise Exception("Unknown entropy method %s." % method)
+
 
 def entropy_variance(data, class_attr=None,
     method=DEFAULT_CONTINUOUS_METRIC):
@@ -540,7 +538,7 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper, **
 
     split_attr = kwargs.get('split_attr', None)
     split_val = kwargs.get('split_val', None)
-    
+
     assert class_attr not in attributes
     node = None
     data = list(data) if isinstance(data, Data) else data
@@ -867,7 +865,7 @@ class Node:
         for value in self.get_values(attr_name):
             if value in branches:
                 continue
-            elif self.tree.data.is_continuous_class:
+            if self.tree.data.is_continuous_class:
                 branches[value] = self._attr_value_cdist[self.attr_name][value].copy()
             else:
                 branches[value] = self.get_value_ddist(self.attr_name, value)
@@ -1867,7 +1865,7 @@ class Test(unittest.TestCase):
 
     def test_milksets(self):
         try:
-            from milksets import wine, yeast
+            from milksets import wine, yeast # pylint: disable=import-outside-toplevel
         except ImportError:
             print('Skipping milkset tests because milksets is not installed.')
             print('Run `sudo pip install milksets` and rerun these tests.')
