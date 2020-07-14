@@ -15,12 +15,9 @@ import os
 import random
 import re
 import unittest
+import pickle
 
-import six
-from six.moves import cPickle as pickle
-from six import iteritems, iterkeys, itervalues, string_types
-
-VERSION = (1, 0, 1)
+VERSION = (2, 0, 0)
 __version__ = '.'.join(map(str, VERSION))
 
 # Traditional entropy.
@@ -133,7 +130,7 @@ def normcdf(x, mu, sigma):
     Describes the probability that a real-valued random variable X with a given
     probability distribution will be found at a value less than or equal to X
     in a normal distribution.
-    
+
     http://en.wikipedia.org/wiki/Cumulative_distribution_function
     """
     t = x-mu
@@ -146,7 +143,7 @@ def normpdf(x, mu, sigma):
     """
     Describes the relative likelihood that a real-valued random variable X will
     take on a given value.
-    
+
     http://en.wikipedia.org/wiki/Probability_density_function
     """
     u = (x-mu)/abs(sigma)
@@ -168,18 +165,18 @@ def normrange(x1, x2, mu, sigma, f=True):
 def cmp(a, b): # pylint: disable=redefined-builtin
     return (a > b) - (a < b)
 
-class DDist(object):
+class DDist:
     """
     Incrementally tracks the probability distribution of discrete elements.
     """
-    
+
     def __init__(self, seq=None):
         self.clear()
         if seq:
             for k in seq:
                 self.counts[k] += 1
                 self.total += 1
-    
+
     def __cmp__(self, other):
         if not isinstance(other, type(self)):
             return NotImplemented
@@ -187,13 +184,13 @@ class DDist(object):
             (frozenset(self.counts.items()), self.total),
             (frozenset(other.counts.items()), other.total)
         )
-    
+
     def __eq__(self, other):
         if not isinstance(other, type(self)):
             return NotImplemented
         return (frozenset(self.counts.items()), self.total) == \
             (frozenset(other.counts.items()), other.total)
-    
+
     def __getitem__(self, k):
         """
         Returns the probability for the given element.
@@ -202,33 +199,33 @@ class DDist(object):
         if k in self.counts:
             cnt = self.counts[k]
         return cnt/float(self.total)
-    
+
     def __hash__(self):
         return hash((frozenset(self.counts.items()), self.total))
-    
+
     def __repr__(self):
         s = []
         for k, prob in self.probs:
             s.append("%s=%s" % (k, prob))
         return "<%s %s>" % (type(self).__name__, ', '.join(s))
-    
+
     def add(self, k, count=1):
         """
         Increments the count for the given element.
         """
         self.counts[k] += count
         self.total += count
-    
+
     @property
     def best(self):
         """
         Returns the element with the highest probability.
         """
         b = (-1e999999, None)
-        for k, c in iteritems(self.counts):
+        for k, c in self.counts.items():
             b = max(b, (c, k))
         return b[1]
-    
+
     @property
     def best_prob(self):
         probs = self.probs
@@ -238,24 +235,24 @@ class DDist(object):
         for _, prob in probs:
             best = max(best, prob)
         return best
-    
+
     def clear(self):
         self.counts = defaultdict(int)
         self.total = 0
-    
+
     def copy(self):
         return copy.deepcopy(self)
-    
+
     @property
     def count(self):
         """
         The total number of samples forming this distribution.
         """
         return self.total
-    
+
     def keys(self):
         return self.counts.keys()
-    
+
     @property
     def probs(self):
         """
@@ -264,23 +261,23 @@ class DDist(object):
         """
         return [
             (k, self.counts[k]/float(self.total))
-            for k in iterkeys(self.counts)
+            for k in self.counts.keys()
         ]
-    
+
     def update(self, dist):
         """
         Adds the given distribution's counts to the current distribution.
         """
         assert isinstance(dist, DDist)
-        for k, c in iteritems(dist.counts):
+        for k, c in dist.counts.items():
             self.counts[k] += c
         self.total += dist.total
 
-class CDist(object):
+class CDist:
     """
     Incrementally tracks the probability distribution of continuous numbers.
     """
-    
+
     def __init__(self, seq=None, mean=None, var=None, stdev=None):
         self.clear()
         if mean is not None:
@@ -295,19 +292,18 @@ class CDist(object):
         if seq:
             for n in seq:
                 self += n
-    
+
     def clear(self):
         self.mean_sum = 0
         self.mean_count = 0
         self.last_variance = 0
-    
+
     def copy(self):
         return copy.deepcopy(self)
-    
+
     def __repr__(self):
-        return "<%s mean=%s variance=%s>" \
-            % (type(self).__name__, self.mean, self.variance)
-    
+        return "<%s mean=%s variance=%s>" % (type(self).__name__, self.mean, self.variance)
+
     def __iadd__(self, value):
         last_mean = self.mean
         self.mean_sum += value
@@ -316,31 +312,31 @@ class CDist(object):
             self.last_variance = self.last_variance \
                 + (value  - last_mean)*(value - self.mean)
         return self
-    
+
     @property
     def count(self):
         """
         The total number of samples forming this distribution.
         """
         return self.mean_count
-        
+
     @property
     def mean(self):
         if self.mean_count:
             return self.mean_sum/float(self.mean_count)
-    
+
     @property
     def variance(self):
         if self.mean_count:
             return self.last_variance/float(self.mean_count)
-        
+
     @property
     def standard_deviation(self):
         var = self.variance
         if var is None:
             return
         return math.sqrt(var)
-    
+
     def probability_lt(self, x):
         """
         Returns the probability of a random variable being less than the
@@ -349,7 +345,7 @@ class CDist(object):
         if self.mean is None:
             return
         return normdist(x=x, mu=self.mean, sigma=self.standard_deviation)
-    
+
     def probability_in(self, a, b):
         """
         Returns the probability of a random variable falling between the given
@@ -360,7 +356,7 @@ class CDist(object):
         p1 = normdist(x=a, mu=self.mean, sigma=self.standard_deviation)
         p2 = normdist(x=b, mu=self.mean, sigma=self.standard_deviation)
         return abs(p1 - p2)
-    
+
     def probability_gt(self, x):
         """
         Returns the probability of a random variable being greater than the
@@ -374,15 +370,14 @@ class CDist(object):
 def entropy(data, class_attr=None, method=DEFAULT_DISCRETE_METRIC):
     """
     Calculates the entropy of the attribute attr in given data set data.
-    
+
     Parameters:
     data<dict|list> :=
         if dict, treated as value counts of the given attribute name
         if list, treated as a raw list from which the value counts will be generated
     attr<string> := the name of the class attribute
     """
-    assert (class_attr is None and isinstance(data, dict)) \
-        or (class_attr is not None and isinstance(data, list))
+    assert (class_attr is None and isinstance(data, dict)) or (class_attr is not None and isinstance(data, list))
     if isinstance(data, dict):
         counts = data
     else:
@@ -391,21 +386,20 @@ def entropy(data, class_attr=None, method=DEFAULT_DISCRETE_METRIC):
             # Note: A missing attribute is treated like an attribute with a value
             # of None, representing the attribute is "irrelevant".
             counts[record.get(class_attr)] += 1.0
-    len_data = float(sum(cnt for _, cnt in iteritems(counts)))
+    len_data = float(sum(cnt for _, cnt in counts.items()))
     n = max(2, len(counts))
     total = float(sum(counts.values()))
     assert total, "There must be at least one non-zero count."
     try:
-        #return -sum((count/total)*math.log(count/total,n) for count in counts)
         if method == ENTROPY1:
             return -sum((count/len_data)*math.log(count/len_data, n)
-                for count in itervalues(counts) if count)
+                for count in counts.values() if count)
         elif method == ENTROPY2:
             return -sum((count/len_data)*math.log(count/len_data, n)
-                for count in itervalues(counts) if count) - ((len(counts)-1)/float(total))
+                for count in counts.values() if count) - ((len(counts)-1)/float(total))
         elif method == ENTROPY3:
             return -sum((count/len_data)*math.log(count/len_data, n)
-                for count in itervalues(counts) if count) - 100*((len(counts)-1)/float(total))
+                for count in counts.values() if count) - 100*((len(counts)-1)/float(total))
         else:
             raise Exception("Unknown entropy method %s." % method)
     except Exception:
@@ -418,8 +412,7 @@ def entropy_variance(data, class_attr=None,
     entropy metric.
     """
     assert method in CONTINUOUS_METRICS, "Unknown entropy variance metric: %s" % (method,)
-    assert (class_attr is None and isinstance(data, dict)) \
-        or (class_attr is not None and isinstance(data, list))
+    assert (class_attr is None and isinstance(data, dict)) or (class_attr is not None and isinstance(data, list))
     if isinstance(data, dict):
         lst = data
     else:
@@ -432,9 +425,9 @@ def get_gain(data, attr, class_attr,
     """
     Calculates the information gain (reduction in entropy) that would
     result by splitting the data on the chosen attribute (attr).
-    
+
     Parameters:
-    
+
     prefer_fewer_values := Weights the gain by the count of the attribute's
         unique values. If multiple attributes have the same gain, but one has
         slightly fewer attributes, this will cause the one with fewer
@@ -455,19 +448,16 @@ def get_gain(data, attr, class_attr,
         data_subset = [record for record in data if record.get(attr) == val]
         e = entropy_func(data_subset, class_attr, method=method)
         subset_entropy += val_prob * e
-        
+
     if only_sub:
         return subset_entropy
 
     # Subtract the entropy of the chosen attribute from the entropy of the
     # whole data set with respect to the target attribute (and return it)
     main_entropy = entropy_func(data, class_attr, method=method)
-    
+
     # Prefer gains on attributes with fewer values.
     if prefer_fewer_values:
-#        n = len(val_freq)
-#        w = (n+1)/float(n)/2
-        #return (main_entropy - subset_entropy)*w
         return ((main_entropy - subset_entropy), 1./len(val_freq))
     else:
         return (main_entropy - subset_entropy)
@@ -501,7 +491,7 @@ def most_frequent(lst):
         if lst.count(val) > highest_freq:
             most_freq = val
             highest_freq = lst.count(val)
-            
+
     return most_freq
 
 def unique(lst):
@@ -516,14 +506,14 @@ def unique(lst):
     for item in lst:
         if unique_lst.count(item) <= 0:
             unique_lst.append(item)
-            
+
     # Return the list with all redundant values removed.
     return unique_lst
 
 def get_values(data, attr):
     """
     Creates a list of values in the chosen attribut for each record in data,
-    prunes out all of the redundant values, and return the list.  
+    prunes out all of the redundant values, and return the list.
     """
     return unique([record[attr] for record in data])
 
@@ -547,10 +537,10 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper, **
     """
     Returns a new decision tree based on the examples given.
     """
-    
+
     split_attr = kwargs.get('split_attr', None)
     split_val = kwargs.get('split_val', None)
-    
+
     node = None
     data = list(data) if isinstance(data, Data) else data
     if wrapper.is_continuous_class:
@@ -589,7 +579,6 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper, **
 
         # Create a new decision tree/node with the best attribute and an empty
         # dictionary object--we'll fill that up next.
-#        tree = {best:{}}
         node = Node(tree=wrapper, attr_name=best)
         node.n += len(data)
 
@@ -617,52 +606,48 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper, **
 
     return node
 
-class Data(object):
+class Data:
     """
     Parses, validates and iterates over tabular data in a file
     or an generic iterator.
-    
+
     This does not store the actual data rows. It only stores the row schema.
     """
-    
+
     def __init__(self, inp, order=None, types=None, modes=None):
-        
+
         self.header_types = types or {} # {attr_name:type}
         self.header_modes = modes or {} # {attr_name:mode}
-        if isinstance(order, string_types):
+        if isinstance(order, str):
             order = order.split(',')
         self.header_order = order or [] # [attr_name,...]
-        
+
         # Validate header type.
         if isinstance(self.header_types, (tuple, list)):
-            assert self.header_order, 'If header type names were not ' + \
-                'given, an explicit order must be specified.'
-            assert len(self.header_types) == len(self.header_order), \
-                'Header order length must match header type length.'
+            assert self.header_order, 'If header type names were not given, an explicit order must be specified.'
+            assert len(self.header_types) == len(self.header_order), 'Header order length must match header type length.'
             self.header_types = dict(zip(self.header_order, self.header_types))
-        
+
         self.filename = None
         self.data = None
-        if isinstance(inp, string_types):
+        if isinstance(inp, str):
             filename = inp
-            assert os.path.isfile(filename), \
-                "File \"%s\" does not exist." % filename
+            assert os.path.isfile(filename), "File \"%s\" does not exist." % filename
             self.filename = filename
         else:
             assert self.header_types, "No attribute types specified."
             assert self.header_modes, "No attribute modes specified."
-            #assert self.header_order, "No attribute order specified."
             self.data = inp
-        
+
         self._class_attr_name = None
         if self.header_modes:
-            for k, v in iteritems(self.header_modes):
+            for k, v in self.header_modes.items():
                 if v != CLS:
                     continue
                 self._class_attr_name = k
                 break
             assert self._class_attr_name, "No class attribute specified."
-    
+
     def copy_no_data(self):
         """
         Returns a copy of the object without any data.
@@ -672,7 +657,7 @@ class Data(object):
             order=list(self.header_modes),
             types=self.header_types.copy(),
             modes=self.header_modes.copy())
-    
+
     def __len__(self):
         if self.filename:
             return max(0, open(self.filename).read().strip().count('\n'))
@@ -691,7 +676,7 @@ class Data(object):
     def attribute_names(self):
         self._read_header()
         return [
-            n for n in iterkeys(self.header_types)
+            n for n in self.header_types.keys()
             if n != self._class_attr_name
         ]
 
@@ -703,8 +688,7 @@ class Data(object):
     @property
     def is_continuous_class(self):
         self._read_header()
-        return self.get_attribute_type(self._class_attr_name) \
-            == ATTR_TYPE_CONTINUOUS
+        return self.get_attribute_type(self._class_attr_name) == ATTR_TYPE_CONTINUOUS
 
     def is_valid(self, name, value):
         """
@@ -730,7 +714,6 @@ class Data(object):
         if not self.filename or self.header_types:
             return
         rows = csv.reader(open(self.filename))
-        #header = rows.next()
         header = next(rows)
         self.header_types = {} # {attr_name:type}
         self._class_attr_name = None
@@ -743,12 +726,10 @@ class Data(object):
             self.header_order.append(el_name)
             self.header_types[el_name] = el_type
             if el_mode == ATTR_MODE_CLASS:
-                assert self._class_attr_name is None, \
-                    "Multiple class attributes are not supported."
+                assert self._class_attr_name is None, "Multiple class attributes are not supported."
                 self._class_attr_name = el_name
             else:
-                assert self.header_types[el_name] != ATTR_TYPE_CONTINUOUS, \
-                    "Non-class continuous attributes are not supported."
+                assert self.header_types[el_name] != ATTR_TYPE_CONTINUOUS, "Non-class continuous attributes are not supported."
         assert self._class_attr_name, "A class attribute must be specified."
 
     def validate_row(self, row):
@@ -758,12 +739,11 @@ class Data(object):
         clean_row = {}
         if isinstance(row, (tuple, list)):
             assert self.header_order, "No attribute order specified."
-            assert len(row) == len(self.header_order), \
-                "Row length does not match header length."
+            assert len(row) == len(self.header_order), "Row length does not match header length."
             itr = zip(self.header_order, row)
         else:
             assert isinstance(row, dict)
-            itr = iteritems(row)
+            itr = row.items()
         for el_name, el_value in itr:
             if self.header_types[el_name] == ATTR_TYPE_DISCRETE:
                 clean_row[el_name] = int(el_value)
@@ -786,15 +766,15 @@ class Data(object):
             if not row:
                 continue
             yield self.validate_row(row)
-            
+
     def split(self, ratio=0.5, leave_one_out=False):
         """
         Returns two Data instances, containing the data randomly split between
         the two according to the given ratio.
-        
+
         The first instance will contain the ratio of data specified.
         The second instance will contain the remaining ratio of data.
-        
+
         If leave_one_out is True, the ratio will be ignored and the first
         instance will contain exactly one record for each class label, and
         the second instance will contain all remaining data.
@@ -837,49 +817,49 @@ def _get_dd_cdist():
 class NodeNotReadyToPredict(Exception):
     pass
 
-class Node(object):
+class Node:
     """
     Represents a specific split or branch in the tree.
     """
-    
+
     def __init__(self, tree, attr_name=None):
-        
+
         # The number of samples this node has been trained on.
         self.n = 0
-        
+
         # A reference to the container tree instance.
         self._tree = tree
-        
+
         # The splitting attribute at this node.
         self.attr_name = attr_name
-        
+
         #### Discrete values.
-        
+
         # Counts of each observed attribute value, used to calculate an
         # attribute value's probability.
         # {attr_name:{attr_value:count}}
         self._attr_value_counts = defaultdict(_get_dd_int)
         # {attr_name:total}
         self._attr_value_count_totals = defaultdict(int)
-        
+
         # Counts of each observed class value and attribute value in
         # combination, used to calculate an attribute value's entropy.
         # {attr_name:{attr_value:{class_value:count}}}
         self._attr_class_value_counts = defaultdict(_get_dd_dd_int)
-        
+
         #### Continuous values.
-        
+
         # Counts of each observed class value, used to calculate a class
         # value's probability.
         # {class_value:count}
         self._class_ddist = DDist()
-        
+
         # {attr_name:{attr_value:CDist(variance)}}
         self._attr_value_cdist = defaultdict(_get_dd_cdist)
         self._class_cdist = CDist()
-        
+
         self._branches = {} # {v:Node}
-    
+
     def __getitem__(self, attr_name):
         assert attr_name == self.attr_name
         branches = self._branches.copy()
@@ -897,13 +877,12 @@ class Node(object):
         Gets the closest value for the current node's attribute matching the
         given record.
         """
-        
-        # Abort if this node has not get split on an attribute. 
+
+        # Abort if this node has not get split on an attribute.
         if self.attr_name is None:
             return
-        
-        # Otherwise, lookup the attribute value for this node in the
-        # given record.
+
+        # Otherwise, lookup the attribute value for this node in the given record.
         attr = self.attr_name
         attr_value = record[attr]
         attr_values = self.get_values(attr)
@@ -914,20 +893,14 @@ class Node(object):
             # map to any previously known values, so apply a missing value
             # policy.
             policy = self.tree.missing_value_policy.get(attr)
-            assert policy, \
-                ("No missing value policy specified for attribute %s.") \
-                % (attr,)
+            assert policy, "No missing value policy specified for attribute %s." % (attr,)
             if policy == USE_NEAREST:
                 # Use the value that the tree has seen that's also has the
                 # smallest Euclidean distance to the actual value.
-                assert self.tree.data.header_types[attr] \
-                    in (ATTR_TYPE_DISCRETE, ATTR_TYPE_CONTINUOUS), \
-                    "The use-nearest policy is invalid for nominal types."
+                assert self.tree.data.header_types[attr] in (ATTR_TYPE_DISCRETE, ATTR_TYPE_CONTINUOUS), "The use-nearest policy is invalid for nominal types."
                 nearest = (1e999999, None)
                 for _value in attr_values:
-                    nearest = min(
-                        nearest,
-                        (abs(_value - attr_value), _value))
+                    nearest = min(nearest, (abs(_value - attr_value), _value))
                 _, nearest_value = nearest
                 return nearest_value
             else:
@@ -935,8 +908,8 @@ class Node(object):
 
     @property
     def attributes(self):
-        return iterkeys(self._attr_value_counts)
-    
+        return self._attr_value_counts.keys()
+
     def get_values(self, attr_name):
         """
         Retrieves the unique set of values seen for the given attribute
@@ -947,7 +920,7 @@ class Node(object):
             + list(self._branches.keys())
         ret = set(ret)
         return ret
-    
+
     @property
     def is_continuous_class(self):
         return self._tree.is_continuous_class
@@ -997,13 +970,13 @@ class Node(object):
                 unique_value_count = len(self._attr_value_counts[attr_name])
                 attr_total = float(self._attr_value_count_totals[attr_name])
             assert total, "There must be at least one non-zero count."
-            
+
             n = max(2, len(counts))
             if self._tree.metric == ENTROPY1:
                 # Traditional entropy.
                 return -sum(
                     (count/total)*math.log(count/total, n)
-                    for count in itervalues(counts)
+                    for count in counts.values()
                 )
             elif self._tree.metric == ENTROPY2:
                 # Modified entropy that down-weights universally unique values.
@@ -1012,24 +985,22 @@ class Node(object):
                 # values.
                 return -sum(
                     (count/total)*math.log(count/total, n)
-                    for count in itervalues(counts)
-                #) - ((len(counts)-1)/float(total))
+                    for count in counts.values()
                 ) + (unique_value_count/attr_total)
             elif self._tree.metric == ENTROPY3:
                 # Modified entropy that down-weights universally unique values
                 # as well as features with large numbers of values.
                 return -sum(
                     (count/total)*math.log(count/total, n)
-                    for count in itervalues(counts)
-                #) - 100*((len(counts)-1)/float(total))
+                    for count in counts.values()
                 ) + 100*(unique_value_count/attr_total)
-        
+
     def get_gain(self, attr_name):
         """
         Calculates the information gain from splitting on the given attribute.
         """
         subset_entropy = 0.0
-        for value in iterkeys(self._attr_value_counts[attr_name]):
+        for value in self._attr_value_counts[attr_name].keys():
             value_prob = self.get_value_prob(attr_name, value)
             e = self.get_entropy(attr_name, value)
             subset_entropy += value_prob * e
@@ -1040,15 +1011,13 @@ class Node(object):
         Returns the class value probability distribution of the given
         attribute value.
         """
-        assert not self.tree.data.is_continuous_class, \
-            "Discrete distributions are only maintained for " + \
-            "discrete class types."
+        assert not self.tree.data.is_continuous_class, "Discrete distributions are only maintained for discrete class types."
         ddist = DDist()
         cls_counts = self._attr_class_value_counts[attr_name][attr_value]
-        for cls_value, cls_count in iteritems(cls_counts):
+        for cls_value, cls_count in cls_counts.items():
             ddist.add(cls_value, count=cls_count)
         return ddist
-    
+
     def get_value_prob(self, attr_name, value):
         """
         Returns the value probability of the given attribute at this node.
@@ -1065,20 +1034,20 @@ class Node(object):
         Calculates the overall entropy of the class attribute.
         """
         return self.get_entropy()
-    
+
     def predict(self, record, depth=0):
         """
         Returns the estimated value of the class attribute for the given
         record.
         """
-        
+
         # Check if we're ready to predict.
         if not self.ready_to_predict:
             raise NodeNotReadyToPredict
-        
+
         # Lookup attribute value.
         attr_value = self._get_attribute_value_for_node(record)
-        
+
         # Propagate decision to leaf node.
         if self.attr_name:
             if attr_value in self._branches:
@@ -1087,13 +1056,12 @@ class Node(object):
                 except NodeNotReadyToPredict:
                     #TODO:allow re-raise if user doesn't want an intermediate prediction?
                     pass
-                
+
         # Otherwise make decision at current node.
         if self.attr_name:
             if self._tree.data.is_continuous_class:
                 return self._attr_value_cdist[self.attr_name][attr_value].copy()
             else:
-#                return self._class_ddist.copy()
                 return self.get_value_ddist(self.attr_name, attr_value)
         elif self._tree.data.is_continuous_class:
             # Make decision at current node, which may be a true leaf node
@@ -1117,15 +1085,13 @@ class Node(object):
         threshold = self._tree.leaf_threshold
         if self._tree.data.is_continuous_class:
             var = self._class_cdist.variance
-            if var is not None and threshold is not None \
-            and var <= threshold:
+            if var is not None and threshold is not None and var <= threshold:
                 return False
         else:
             best_prob = self._class_ddist.best_prob
-            if best_prob is not None and threshold is not None \
-            and best_prob >= threshold:
+            if best_prob is not None and threshold is not None and best_prob >= threshold:
                 return False
-            
+
         return self._tree.auto_grow \
             and not self.attr_name \
             and self.n >= self._tree.splitting_n
@@ -1135,14 +1101,11 @@ class Node(object):
         Sets the probability distribution at a leaf node.
         """
         assert self.attr_name
-        assert self.tree.data.is_valid(self.attr_name, attr_value), \
-            "Value %s is invalid for attribute %s." \
-                % (attr_value, self.attr_name)
+        assert self.tree.data.is_valid(self.attr_name, attr_value), "Value %s is invalid for attribute %s." % (attr_value, self.attr_name)
         if self.is_continuous_class:
             assert isinstance(dist, CDist)
             assert self.attr_name
             self._attr_value_cdist[self.attr_name][attr_value] = dist.copy()
-#            self.n += dist.count
         else:
             assert isinstance(dist, DDist)
             # {attr_name:{attr_value:count}}
@@ -1150,10 +1113,9 @@ class Node(object):
             # {attr_name:total}
             self._attr_value_count_totals[self.attr_name] += 1
             # {attr_name:{attr_value:{class_value:count}}}
-            for cls_value, cls_count in iteritems(dist.counts):
-                self._attr_class_value_counts[self.attr_name][attr_value] \
-                    [cls_value] += cls_count
-    
+            for cls_value, cls_count in dist.counts.items():
+                self._attr_class_value_counts[self.attr_name][attr_value][cls_value] += cls_count
+
     def to_dict(self):
         if self.attr_name:
             # Show a value's branch, whether it's a leaf or another node.
@@ -1163,11 +1125,9 @@ class Node(object):
                 if attr_value in self._branches:
                     ret[self.attr_name][attr_value] = self._branches[attr_value].to_dict()
                 elif self._tree.data.is_continuous_class:
-                    ret[self.attr_name][attr_value] = \
-                        self._attr_value_cdist[self.attr_name][attr_value].copy()
+                    ret[self.attr_name][attr_value] = self._attr_value_cdist[self.attr_name][attr_value].copy()
                 else:
-                    ret[self.attr_name][attr_value] = \
-                        self.get_value_ddist(self.attr_name, attr_value)
+                    ret[self.attr_name][attr_value] = self.get_value_ddist(self.attr_name, attr_value)
             return ret
         elif self.tree.data.is_continuous_class:
             # Otherwise we're at a continuous leaf node.
@@ -1187,7 +1147,7 @@ class Node(object):
         self.n += 1
         class_attr = self.tree.data.class_attribute_name
         class_value = record[class_attr]
-        
+
         # Update class statistics.
         is_con = self.tree.data.is_continuous_class
         if is_con:
@@ -1196,9 +1156,9 @@ class Node(object):
         else:
             # For a discrete class.
             self._class_ddist.add(class_value)
-        
+
         # Update attribute statistics.
-        for an, av in iteritems(record):
+        for an, av in record.items():
             if an == class_attr:
                 continue
             self._attr_value_counts[an][av] += 1
@@ -1207,7 +1167,7 @@ class Node(object):
                 self._attr_value_cdist[an][av] += class_value
             else:
                 self._attr_class_value_counts[an][av][class_value] += 1
-        
+
         # Decide if branch should split on an attribute.
         if self.ready_to_split:
             self.attr_name = self.get_best_splitting_attr()
@@ -1215,48 +1175,47 @@ class Node(object):
             for av in self._attr_value_counts[self.attr_name]:
                 self._branches[av] = Node(tree=self.tree)
                 self.tree.leaf_count += 1
-            
+
         # If we've split, then propagate the update to appropriate sub-branch.
         if self.attr_name:
             key = record[self.attr_name]
             del record[self.attr_name]
             self._branches[key].train(record)
 
-class Tree(object):
+class Tree:
     """
     Represents a single grown or built decision tree.
     """
-    
+
     def __init__(self, data, **kwargs):
         assert isinstance(data, Data)
         self._data = data
-        
+
         # Root splitting node.
         # This can be traversed via [name1][value1][name2][value2]...
         self._tree = Node(self)
-        
+
         # The mean absolute error.
         self.mae = CDist()
         self._mae_clean = True
-        
-        # Set the metric used to calculate the information gain
-        # after an attribute split.
+
+        # Set the metric used to calculate the information gain after an attribute split.
         if self.data.is_continuous_class:
             self.metric = kwargs.get('metric', DEFAULT_CONTINUOUS_METRIC)
             assert self.metric in CONTINUOUS_METRICS
         else:
             self.metric = kwargs.get('metric', DEFAULT_DISCRETE_METRIC)
             assert self.metric in DISCRETE_METRICS
-            
+
         # Set metric to splitting nodes after a sample threshold has been met.
         self.splitting_n = kwargs.get('splitting_n', 100)
-        
+
         # Declare the policy for handling missing values for each attribute.
         self.missing_value_policy = {}
-        
+
         # Allow the tree to automatically grow and split after an update().
         self.auto_grow = kwargs.get('auto_grow', False)
-        
+
         # Determine the threshold at which further splitting is unnecessary
         # if enough accuracy has been achieved.
         if self.data.is_continuous_class:
@@ -1265,26 +1224,26 @@ class Tree(object):
         else:
             # A 100% probability is the default discrete stopping criteria.
             self.leaf_threshold = kwargs.get('leaf_threshold', 1.0)
-            
+
         # The total number of leaf nodes.
         self.leaf_count = 0
-        
+
         # The total number of samples trained on.
         self.sample_count = 0
-        
+
         ### Used for forests.
-        
+
         # The prediction accuracy on held-out samples.
         self.out_of_bag_accuracy = CDist()
-        
+
         # Samples not given to the tree for training with which the
         # out-of-bag accuracy is calculated from.
         self._out_of_bag_samples = []
-        
+
         # The mean absolute error for predictions on out-of-bag samples.
         self._out_of_bag_mae = CDist()
         self._out_of_bag_mae_clean = True
-    
+
     def __getitem__(self, attr_name):
         return self.tree[attr_name]
 
@@ -1299,7 +1258,7 @@ class Tree(object):
             fitness_func = gain_variance
         else:
             fitness_func = get_gain
-        
+
         t = cls(data=data, *args, **kwargs)
         t._data = data
         t.sample_count = len(data)
@@ -1311,21 +1270,21 @@ class Tree(object):
             wrapper=t,
         )
         return t
-    
+
     @property
     def data(self):
         return self._data
-    
+
     @property
     def is_continuous_class(self):
         return self.data.is_continuous_class
-    
+
     @classmethod
     def load(cls, fn):
         tree = pickle.load(open(fn))
         assert isinstance(tree, cls), "Invalid pickle."
         return tree
-    
+
     @property
     def out_of_bag_mae(self):
         """
@@ -1339,7 +1298,7 @@ class Tree(object):
             except NodeNotReadyToPredict:
                 return
         return self._out_of_bag_mae.copy()
-    
+
     @property
     def out_of_bag_samples(self):
         """
@@ -1347,7 +1306,7 @@ class Tree(object):
         of modifications.
         """
         #TODO:replace with more a generic pass-through wrapper?
-        class O(object):
+        class O:
             def __init__(self, tree):
                 self.tree = tree
             def __len__(self):
@@ -1366,18 +1325,17 @@ class Tree(object):
     def predict(self, record):
         record = record.copy()
         return self._tree.predict(record)
-    
+
     def save(self, fn):
         pickle.dump(self, open(fn, 'w'))
-    
+
     def set_missing_value_policy(self, policy, target_attr_name=None):
         """
         Sets the behavior for one or all attributes to use when traversing the
         tree using a query vector and it encounters a branch that does not
         exist.
         """
-        assert policy in MISSING_VALUE_POLICIES, \
-            "Unknown policy: %s" % (policy,)
+        assert policy in MISSING_VALUE_POLICIES, "Unknown policy: %s" % (policy,)
         for attr_name in self.data.attribute_names:
             if target_attr_name is not None and target_attr_name != attr_name:
                 continue
@@ -1388,8 +1346,6 @@ class Tree(object):
         Iterates over the data, classifying or regressing each element and then
         finally returns the classification accuracy or mean-absolute-error.
         """
-#        assert data.header_types == self._data.header_types, \
-#            "Test data schema does not match the tree's schema."
         is_cont = self._data.is_continuous_class
         agg = CDist()
         for record in data:
@@ -1403,20 +1359,19 @@ class Tree(object):
                 assert isinstance(actual_value, DDist)
                 agg += actual_value.best == expected_value
         return agg
-    
+
     def to_dict(self):
         return self._tree.to_dict()
-    
+
     @property
     def tree(self):
         return self._tree
-    
+
     def train(self, record):
         """
         Incrementally updates the tree with the given sample record.
         """
-        assert self.data.class_attribute_name in record, \
-            "The class attribute must be present in the record."
+        assert self.data.class_attribute_name in record, "The class attribute must be present in the record."
         record = record.copy()
         self.sample_count += 1
         self.tree.train(record)
@@ -1424,48 +1379,41 @@ class Tree(object):
 def _get_defaultdict_cdist():
     return defaultdict(CDist)
 
-class Forest(object):
-    
+class Forest:
+
     def __init__(self, data, tree_kwargs=None, **kwargs):
         assert isinstance(data, Data)
         self._data = data
-        
+
         # The population of trees.
         self.trees = []
-        
+
         # Arguments that will be passed to each tree during init.
         self.tree_kwargs = tree_kwargs or {}
-        
+
         self.grow_method = kwargs.get('grow_method', GROW_RANDOM)
-        assert self.grow_method in GROW_METHODS, \
-            "Growth method %s is not supported." % (self.grow_method,)
-        
+        assert self.grow_method in GROW_METHODS, "Growth method %s is not supported." % (self.grow_method,)
+
         # The number of trees in the forest.
         self.size = kwargs.get('size', 10)
-        
+
         # The ratio of training samples given to each tree.
         # The rest are held to test tree accuracy.
         self.sample_ratio = kwargs.get('sample_ratio', 0.9)
-        
+
         # The maximum number of out of bag samples to store in each tree.
-        self.max_out_of_bag_samples = \
-            kwargs.get('max_out_of_bag_samples', 1000)
-        
+        self.max_out_of_bag_samples = kwargs.get('max_out_of_bag_samples', 1000)
+
         # The method for how we consolidate each tree's prediction into
         # a single prediction.
-#        self.aggregation_method = kwargs.get('aggregation_method', WEIGHTED_MEAN)
-#        assert self.aggregation_method in AGGREGATION_METHODS, \
-#            "Aggregation method %s is not supported." \
-#                % (self.aggregation_method,)
-        self.weighting_method = kwargs.get('weighting_method',
-            Forest.mean_oob_mae_weight)
-                
+        self.weighting_method = kwargs.get('weighting_method', Forest.mean_oob_mae_weight)
+
         # The criteria defining how and when old trees are removed from the
         # forest and replaced by new trees.
         # This is a callable that is given a list of all the current trees
         # and returns a list of trees that should be removed.
         self.fell_method = kwargs.get('fell_method', None)
-    
+
     def _fell_trees(self):
         """
         Removes trees from the forest according to the specified fell method.
@@ -1473,7 +1421,7 @@ class Forest(object):
         if callable(self.fell_method):
             for tree in self.fell_method(list(self.trees)):
                 self.trees.remove(tree)
-    
+
     def _get_best_prediction(self, record, train=True):
         """
         Gets the prediction from the tree with the lowest mean absolute error.
@@ -1486,7 +1434,7 @@ class Forest(object):
         _, best_tree = best
         prediction, tree_mae = best_tree.predict(record, train=train)
         return prediction.mean
-    
+
     @staticmethod
     def best_oob_mae_weight(trees):
         """
@@ -1502,7 +1450,7 @@ class Forest(object):
         if best_tree is None:
             return
         return [(1.0, best_tree)]
-        
+
     @staticmethod
     def mean_oob_mae_weight(trees):
         """
@@ -1520,31 +1468,31 @@ class Forest(object):
             return
         weights = normalize(weights)
         return zip(weights, active_trees)
-    
+
     def _grow_trees(self):
         """
         Adds new trees to the forest according to the specified growth method.
         """
         if self.grow_method == GROW_AUTO_INCREMENTAL:
             self.tree_kwargs['auto_grow'] = True
-        
+
         while len(self.trees) < self.size:
             self.trees.append(Tree(data=self.data, **self.tree_kwargs))
-    
+
     @property
     def data(self):
         return self._data
-        
+
     def predict(self, record):
         """
         Attempts to predict the value of the class attribute by aggregating
         the predictions of each tree.
-        
+
         Parameters:
             weighting_formula := a callable that takes a list of trees and
                 returns a list of weights.
         """
-        
+
         # Get raw predictions.
         # {tree:raw prediction}
         predictions = {}
@@ -1566,7 +1514,6 @@ class Forest(object):
         weights = self.weighting_method(predictions.keys())
         if not weights:
             return
-#        assert sum(weights) == 1.0, "Sum of weights must equal 1."
         if self.data.is_continuous_class:
             # Merge continuous class predictions.
             total = sum(w*predictions[tree].mean for w, tree in weights)
@@ -1577,20 +1524,18 @@ class Forest(object):
                 prediction = predictions[tree]
                 for cls_value, cls_prob in prediction.probs:
                     total.add(cls_value, cls_prob*weight)
-        
+
         return total
-    
+
     def set_missing_value_policy(self, policy, target_attr_name=None):
         for tree in self.trees:
             tree.set_missing_value_policy(policy, target_attr_name)
-    
+
     def test(self, data):
         """
         Iterates over the data, classifying or regressing each element and then
         finally returns the classification accuracy or mean-absolute-error.
         """
-#        assert data.header_types == self._data.header_types, \
-#            "Test data schema does not match the tree's schema."
         is_cont = self.data.is_continuous_class
         agg = CDist()
         for record in data:
@@ -1608,7 +1553,7 @@ class Forest(object):
                     "Invalid prediction type: %s" % (type(actual_value),)
                 agg += actual_value.best == expected_value
         return agg
-    
+
     def train(self, record):
         """
         Updates the trees with the given training record.
@@ -1639,14 +1584,12 @@ class Test(unittest.TestCase):
         self.assertAlmostEqual(s.mean, get_mean(nums), 1)
         self.assertAlmostEqual(s.variance, get_variance(nums), 2)
         self.assertEqual(s.count, 9)
-#        print(s.mean
-#        print(s.standard_deviation
         self.assertAlmostEqual(s.probability_lt(s.mean-s.standard_deviation*6), 0.0, 5)
         self.assertAlmostEqual(s.probability_lt(s.mean+s.standard_deviation*6), 1.0, 5)
         self.assertAlmostEqual(s.probability_gt(s.mean-s.standard_deviation*6), 1.0, 5)
         self.assertAlmostEqual(s.probability_gt(s.mean+s.standard_deviation*6), 0.0, 5)
         self.assertAlmostEqual(s.probability_in(s.mean, 50), 0.5, 5)
-        
+
         d1 = DDist(['a', 'b', 'a', 'a', 'b'])
         d2 = DDist(['a', 'b', 'a', 'a', 'b'])
         d3 = DDist(['a', 'b', 'a', 'a', 'b', 'c'])
@@ -1657,19 +1600,17 @@ class Test(unittest.TestCase):
         self.assertEqual(d1.best_prob, 3/5.)
         self.assertEqual(d2.best, 'a')
         self.assertEqual(d3.best, 'a')
-        
+
         print('Done.')
 
     def test_data(self):
         print('Testing data class...')
-        
+
         # Load data from a file.
         data = Data('rdata1')
         self.assertEqual(len(data), 16)
         data = list(Data('rdata1'))
         self.assertEqual(len(data), 16)
-#        for row in data:
-#            print(row
 
         # Load data from memory or some other arbitrary source.
         data = """a,b,c,d,cls
@@ -1691,10 +1632,8 @@ class Test(unittest.TestCase):
 2,4,8,8,b""".strip().split('\n')
         rows = list(csv.DictReader(data))
         self.assertEqual(len(rows), 16)
-        
+
         rows = Data(
-            #csv.DictReader(data),
-            #map(lambda r: r.split(','), data[1:]),
             [r.split(',') for r in data[1:]],
             order=['a', 'b', 'c', 'd', 'cls'],
             types=dict(a=DIS, b=DIS, c=DIS, d=DIS, cls=NOM),
@@ -1703,7 +1642,7 @@ class Test(unittest.TestCase):
         self.assertEqual(len(list(rows)), 16)
         for row in rows:
             print(row)
-            
+
         a, b = rows.split(ratio=0.1)
         self.assertEqual(len(rows), len(a)+len(b))
         print('-'*80)
@@ -1714,18 +1653,17 @@ class Test(unittest.TestCase):
         print('b:')
         for row in b:
             print(row)
-            
+
         print('Done.')
 
     def test_batch_tree(self):
         print('Testing batch tree...')
-        
+
         # If we set no leaf threshold for a continuous class
         # then there will be the same number of leaf nodes
         # as there are number of records.
         t = Tree.build(Data('rdata2'))
         self.assertEqual(type(t), Tree)
-        #pprint(t._tree, indent=4)
         print("Tree:")
         pprint(t.to_dict(), indent=4)
         self.assertEqual(set(t._tree['b'].keys()), set([1, 2, 3, 4]))
@@ -1734,7 +1672,7 @@ class Test(unittest.TestCase):
         print('MAE:', result.mean)
         self.assertAlmostEqual(result.mean, 0.001368, 5)
         self.assertEqual(t.leaf_count, 16)
-        
+
         # If we set a leaf threshold, then this will limit the number of leaf
         # nodes created, speeding up prediction, at the expense of increasing
         # the mean absolute error.
@@ -1747,7 +1685,7 @@ class Test(unittest.TestCase):
         print('MAE:', result.mean)
         self.assertAlmostEqual(result.mean, 0.00623, 5)
         self.assertEqual(t.leaf_count, 10)
-        
+
         t = Tree.build(Data('cdata1'))
         print("Tree:")
         self.assertEqual(t['Age']['36 - 55'].attr_name, 'Marital Status')
@@ -1756,14 +1694,12 @@ class Test(unittest.TestCase):
         self.assertEqual(set(t['Age'].keys()), set(['< 18', '18 - 35', '36 - 55', '> 55']))
         self.assertEqual(t['Age']['18 - 35'].best, 'won\'t buy')
         self.assertEqual(t['Age']['36 - 55']['Marital Status']['single'].best, 'will buy')
-#        return
         d = t.to_dict()
         pprint(d, indent=4)
-#        return
         result = t.test(Data('cdata1'))
         print('Accuracy:', result.mean)
         self.assertAlmostEqual(result.mean, 1.0, 5)
-        
+
         t = Tree.build(Data('cdata2'))
         pprint(t.to_dict(), indent=4)
         result = t.test(Data('cdata2'))
@@ -1772,14 +1708,14 @@ class Test(unittest.TestCase):
         result = t.test(Data('cdata3'))
         print('Accuracy:', result.mean)
         self.assertAlmostEqual(result.mean, 0.75, 5)
-        
+
         # Send it a corpus that's purposefully difficult to predict.
         t = Tree.build(Data('cdata4'))
         pprint(t.to_dict(), indent=4)
         result = t.test(Data('cdata4'))
         print('Accuracy:', result.mean)
         self.assertAlmostEqual(result.mean, 0.5, 5)
-        
+
         # Send it a case it's never seen.
         with self.assertRaises(AssertionError):
             # By default, it should throw an exception because it hasn't been
@@ -1793,87 +1729,76 @@ class Test(unittest.TestCase):
 
     def test_online_tree(self):
         print('Testing online tree...')
-        
+
         rdata3 = Data('rdata3')
         rdata3_lst = list(rdata3)
-        
+
         cdata2 = Data('cdata2')
         cdata2_lst = list(cdata2)
-        
+
         cdata5 = Data('cdata5')
         cdata5_lst = list(cdata5)
-        
+
         tree = Tree(cdata2, metric=ENTROPY1)
         for row in cdata2:
-#            print(row
             tree.train(row)
         node = tree._tree
         attr_gains = [(node.get_gain(attr_name), attr_name) for attr_name in node.attributes]
         attr_gains.sort()
-#        print(attr_gains
         # With traditional entropy, a b and c all evenly divide the class
         # and therefore have the same gain, even though all three
         # have different value frequencies.
         self.assertEqual(attr_gains,
             [(0.0, 'd'), (1.0, 'a'), (1.0, 'b'), (1.0, 'c')])
-        
+
         tree = Tree(cdata2, metric=ENTROPY2)
         for row in cdata2:
-#            print(row
             tree.train(row)
         self.assertEqual(set(node.attributes), set(['a', 'b', 'c', 'd']))
         node = tree._tree
         attr_gains = [(node.get_gain(attr_name), attr_name) for attr_name in node.attributes]
         attr_gains.sort()
-#        print(attr_gains
         # With entropy metric 2, attributes that have fewer unique values
         # will have a slightly greater gain relative to attributes with more
         # unique values.
         self.assertEqual(attr_gains,
             [(-0.375, 'd'), (0.625, 'c'), (0.875, 'b'), (1.0, 'a')])
-        
+
         tree = Tree(rdata3, metric=VARIANCE1)
         for row in rdata3:
-#            print(row
             tree.train(row)
         node = tree._tree
         self.assertEqual(set(node.attributes), set(['a', 'b', 'c', 'd']))
         attr_gains = [(node.get_gain(attr_name), attr_name) for attr_name in node.attributes]
         attr_gains.sort()
-#        print(attr_gains
         # With entropy metric 2, attributes that have fewer unique values
         # will have a slightly greater gain relative to attributes with more
         # unique values.
         self.assertEqual([v for _, v in attr_gains], ['d', 'a', 'b', 'c'])
-        
+
         tree = Tree(rdata3, metric=VARIANCE2)
         for row in rdata3:
-#            print(row
             tree.train(row)
         node = tree._tree
         self.assertEqual(set(node.attributes), set(['a', 'b', 'c', 'd']))
         attr_gains = [(node.get_gain(attr_name), attr_name) for attr_name in node.attributes]
         attr_gains.sort()
-#        print(attr_gains
         # With entropy metric 2, attributes that have fewer unique values
         # will have a slightly greater gain relative to attributes with more
         # unique values.
         self.assertEqual([v for _, v in attr_gains], ['d', 'c', 'b', 'a'])
-        
+
         # Incrementally grow a classification tree.
         print("-"*80)
         print("Incrementally growing classification tree...")
         tree = Tree(cdata5, metric=ENTROPY2, splitting_n=17, auto_grow=True)
         for row in cdata5:
-#            print(row
             tree.train(row)
         acc = tree.test(cdata5)
         print('Initial accuracy:', acc.mean)
         self.assertEqual(acc.mean, 0.25)
-#        print('Current tree:'
-#        pprint(tree.to_dict(), indent=4)
         # Update tree several times to give leaf nodes potential time to split.
-        for _ in six.moves.range(5):
+        for _ in range(5):
             for row in cdata5:
                 #print(row
                 tree.train(row)
@@ -1885,25 +1810,21 @@ class Test(unittest.TestCase):
         # already been found and the tree is fully grown.
         self.assertEqual(tree['b'][1].ready_to_split, False)
         self.assertEqual(tree['b'][1]._branches, {})
-#        for attr in tree['b'][1].attributes:
-#            print(attr, tree['b'][1].get_gain(attr)
         # Test accuracy of fully grown tree.
         acc = tree.test(cdata5)
         self.assertEqual(acc.mean, 1.0)
-        
+
         # Incrementally grow a regression tree.
         print("-"*80)
         print("Incrementally growing regression tree...")
         tree = Tree(rdata3, metric=VARIANCE2, splitting_n=17, auto_grow=True, leaf_threshold=0.0)
         for row in rdata3:
-#            print(row
             tree.train(row)
         mae = tree.test(rdata3)
         print('Initial MAE:', mae.mean)
         self.assertAlmostEqual(mae.mean, 0.4, 5)
-        for _ in six.moves.range(20):
+        for _ in range(20):
             for row in rdata3:
-                #print(row
                 tree.train(row)
             mae = tree.test(rdata3)
             print('MAE:', mae.mean)
@@ -1915,38 +1836,34 @@ class Test(unittest.TestCase):
     def test_forest(self):
         print('Testing forest...')
         print('Growing forest incrementally...')
-        
+
         cdata2 = Data('cdata2')
         cdata2_lst = list(cdata2)
-        
+
         # Incrementally train and test the forest on the same data.
         forest = Forest(
             data=cdata2,
             size=10, # Grow 10 trees.
             sample_ratio=0.8, # Train each tree on 80% of all records.
             grow_method=GROW_AUTO_INCREMENTAL, # Incrementally grow each tree.
-            #weighting_method=Forest.best_oob_mae_weight,
             weighting_method=Forest.mean_oob_mae_weight,
             tree_kwargs=dict(metric=ENTROPY2),
         )
         mae = None
-        for _ in six.moves.range(10):
+        for _ in range(10):
             for row in cdata2_lst:
-                #print(row
                 forest.train(row)
             mae = forest.test(cdata2_lst)
             print('Forest MAE:', mae.mean)
         self.assertEqual(mae.mean, 1.0)
-        
+
         trees = list(forest.trees)
         trees.sort(key=lambda t: t.out_of_bag_mae.mean)
         print('Best tree:')
         pprint(trees[-1].to_dict(), indent=4)
         self.assertEqual(trees[-1].auto_grow, True)
-#        for tree in trees:
-#            pprint(tree.to_dict(), indent=4)
         print('Done.')
-        
+
     def test_milksets(self):
         try:
             from milksets import wine, yeast
@@ -1954,31 +1871,24 @@ class Test(unittest.TestCase):
             print('Skipping milkset tests because milksets is not installed.')
             print('Run `sudo pip install milksets` and rerun these tests.')
             return
-        
+
         def leave_one_out(all_data, metric=None):
             test_data, train_data = all_data.split(leave_one_out=True)
-#            print('test:',len(test_data)
-#            print('train:',len(train_data)
             tree = Tree.build(train_data, metric=metric)
             tree.set_missing_value_policy(USE_NEAREST)
             result = tree.test(test_data)
             return result.mean
-        
+
         def cross_validate(all_data, epoches=10, test_ratio=0.25, metric=None):
             accuracies = []
-            for epoche in six.moves.range(epoches):
-#                print('Epoch:',epoche
-                #test_data,train_data = all_data,all_data
+            for epoche in range(epoches):
                 test_data, train_data = all_data.split(ratio=test_ratio)
-#                print('\ttest:',len(test_data)
-#                print('\ttrain:',len(train_data)
                 tree = Tree.build(train_data, metric=metric)
                 tree.set_missing_value_policy(USE_NEAREST)
                 result = tree.test(test_data)
-#                print('Epoch accuracy:',result.mean
                 accuracies.append(result.mean)
             return sum(accuracies)/float(len(accuracies))
-        
+
         # Load wine dataset.
         # Each record has 13 continuous features
         # and one discrete class containing 2 unique values.
@@ -1986,14 +1896,11 @@ class Test(unittest.TestCase):
         wine_data = Data(
             [list(a)+[b] for a, b in zip(*wine.load())],
             order=map(str, range(13))+['cls'],
-            #types=dict(a=DIS, b=DIS, c=DIS, d=DIS, cls=NOM),
             types=[CON]*13 + [DIS],
             modes=dict(cls=CLS))
         self.assertEqual(len(wine_data), 178)
         self.assertEqual(len(list(wine_data)), 178)
-#        for row in wine_data:
-#            print(row
-            
+
         # Load yeast dataset.
         # Each record has 8 continuous features
         # and one discrete class containing 10 values.
@@ -2001,17 +1908,16 @@ class Test(unittest.TestCase):
         yeast_data = Data(
             [list(a)+[b] for a, b in zip(*yeast.load())],
             order=map(str, range(8))+['cls'],
-            #types=dict(a=DIS, b=DIS, c=DIS, d=DIS, cls=NOM),
             types=[CON]*8 + [DIS],
             modes=dict(cls=CLS))
         self.assertEqual(len(yeast_data), 1484)
         self.assertEqual(len(list(yeast_data)), 1484)
-        
+
         acc = leave_one_out(wine_data, metric=ENTROPY1)
         print('Wine leave-one-out accuracy: %0.2f' % (acc,))
         acc = cross_validate(wine_data, metric=ENTROPY1, test_ratio=0.01, epoches=25)
         print('Wine cross-validated accuracy: %0.2f' % (acc,))
-        
+
         acc = leave_one_out(yeast_data, metric=ENTROPY1)
         print('Yeast leave-one-out accuracy: %0.2f' % (acc,))
         acc = cross_validate(yeast_data, metric=ENTROPY1, test_ratio=0.005, epoches=25)
@@ -2025,31 +1931,25 @@ class Test(unittest.TestCase):
         self.assertAlmostEqual(entropy({0:1000}), 0.0)
         # Everything equally divided is highest entropy.
         self.assertAlmostEqual(entropy({+1:500, -1:500}), 1.0)
-#        
+
         data1 = {+1:1, -1:1}#,0:200-2}
         data2 = {+1:100, -1:100}
-        
+
         # Entropy1 doesn't care about size.
         e11 = entropy(data1, method=ENTROPY1)
-#        print(e11
         e21 = entropy(data2, method=ENTROPY1)
-#        print(e21
         self.assertEqual(e11, 1.0)
         self.assertEqual(e11, e21)
-        
+
         # Entropy2 takes size into account.
         e12 = entropy(data1, method=ENTROPY2)
-#        print(e12
         e22 = entropy(data2, method=ENTROPY2)
-#        print(e22
         self.assertEqual(e12, 0.5)
         self.assertEqual(e22, 0.995)
-        
+
         # Entropy3 takes large numbers of values into account, but otherwise ignores size.
         e13 = entropy(data1, method=ENTROPY3)
-#        print(e13
         e23 = entropy(data2, method=ENTROPY3)
-#        print(e23
         self.assertEqual(e13, -49.0)
         self.assertEqual(e23, 0.5)
 
