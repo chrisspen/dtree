@@ -540,7 +540,8 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper, **
 
     split_attr = kwargs.get('split_attr', None)
     split_val = kwargs.get('split_val', None)
-
+    
+    assert class_attr not in attributes
     node = None
     data = list(data) if isinstance(data, Data) else data
     if wrapper.is_continuous_class:
@@ -555,10 +556,10 @@ def create_decision_tree(data, attributes, class_attr, fitness_func, wrapper, **
         # classification.
         stop = len(stop_value.counts) <= 1
 
-    if not data or (len(attributes) - 1) <= 0:
+    if not data or len(attributes) <= 0:
         # If the dataset is empty or the attributes list is empty, return the
-        # default value. When checking the attributes list for emptiness, we
-        # need to subtract 1 to account for the target attribute.
+        # default value. The target attribute is not in the attributes list, so
+        # we need not subtract 1 to account for the target attribute.
         if wrapper:
             wrapper.leaf_count += 1
         return stop_value
