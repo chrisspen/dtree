@@ -440,7 +440,7 @@ def get_gain(data, attr, class_attr,
         val_freq[record.get(attr)] += 1.0
 
     # Calculate the sum of the entropy for each subset of records weighted
-    # by their probability of occuring in the training set.
+    # by their probability of occurring in the training set.
     for val in val_freq.keys():
         val_prob = val_freq[val] / sum(val_freq.values())
         data_subset = [record for record in data if record.get(attr) == val]
